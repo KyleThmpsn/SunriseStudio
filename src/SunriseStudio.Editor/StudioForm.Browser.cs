@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using SunriseStudio.Editor.Creation;
+using SunriseStudio.Formats;
 using SunriseStudio.Packages;
 using SunriseStudio.Projects;
 using ImGuiIcons = SunriseStudio.Viewport.ImGuiIcons;
@@ -85,11 +86,12 @@ public sealed partial class StudioForm
         string? selectedPackage = !otherView || package == "All packages" ? null : package;
         bool leftoversOnly = open is null && otherAssets;
         bool modifiedOnly = changesOnly;
+        bool realOnly = hideDummies && GearList(open);
         var rows = open is null ? workspace.Assets : workspace.CategoryRows.GetValueOrDefault(open.Name) ?? [];
         filteredNameRevision = workspace.NameRevision;
         browserDirty = false;
         if (words.Length == 0 && selectedCategory is null && selectedType is null && selectedPackage is null
-            && !modifiedOnly && !leftoversOnly)
+            && !modifiedOnly && !leftoversOnly && !realOnly)
         {
             filtered = rows; filterWork = null;
             return;
@@ -99,10 +101,15 @@ public sealed partial class StudioForm
             && (selectedType is null || row.Type == selectedType)
             && (selectedPackage is null || row.Entry.PackageName == selectedPackage)
             && !(leftoversOnly && row.InCategory)
-            && (!modifiedOnly || changes.Contains(row.Entry.TagHash));
+            && (!modifiedOnly || changes.Contains(row.Entry.TagHash))
+            && !(realOnly && row.Names.TryGetItem(row.Entry.TagHash, out var facts)
+                && InvestmentItemKinds.IsDummy(facts));
         (var inline, filterWork) = BrowserRowFilter.Start(rows, words, Keep, token);
         if (inline is not null) filtered = inline;
     }
+
+    private static bool GearList(StudioCategory? open) =>
+        open?.Name is InvestmentItemKinds.Weapons or InvestmentItemKinds.Armor;
 
     /** Shows one category's list; the search text stays and now filters inside it. */
     private void OpenBrowserCategory(string name)
@@ -150,12 +157,20 @@ public sealed partial class StudioForm
     private void DrawAssetBrowserContents()
     {
         PollAssetFilter();
-        ImGui.SetNextItemWidth(-1);
+        // Changed only sits right of the search; it is drawn before the home view, so the home view can list every
+        // changed asset.
+        bool changes = workspace.Project is not null;
+        var style = ImGui.GetStyle();
+        float toggle = ImGui.GetFrameHeight() + style.ItemInnerSpacing.X + ImGui.CalcTextSize("Changed only").X + style.ItemSpacing.X;
+        ImGui.SetNextItemWidth(changes ? -toggle : -1);
         if (ImGui.InputTextWithHint("##assetSearch", "Search items, enemies and assets", ref search, 256))
         { browserDirty = true; searchChanged = clock.Elapsed.TotalSeconds; }
+        if (changes)
+        {
+            ImGui.SameLine();
+            if (ImGui.Checkbox("Changed only", ref changesOnly)) FilterBrowser();
+        }
         if (browserDirty && clock.Elapsed.TotalSeconds - searchChanged > 0.2) FilterBrowser();
-        // Drawn before the home view, so the home view can list every changed asset.
-        if (workspace.Project is not null && ImGui.Checkbox("Changed only", ref changesOnly)) FilterBrowser();
         if (OpenCategory is { } open)
         {
             DrawListHeader(open.Label, open.Tooltip);
@@ -167,7 +182,12 @@ public sealed partial class StudioForm
         else if (search.Length != 0 || changesOnly) DrawListHeader("Results", "Matches in every category");
         else { DrawCategoryHome(); return; }
         if (OpenCategory is null && (otherAssets || category != AllCategories)) DrawOtherFilters();
-        else if (OpenCategory is not null) DrawTypeFilter(-1);
+        else if (OpenCategory is { } list)
+        {
+            bool gear = GearList(list);
+            DrawTypeFilter(gear ? -ImGui.GetFrameHeight() - ImGui.GetStyle().ItemSpacing.X : -1);
+            if (gear) DrawGearFilters();
+        }
         ImGui.Separator();
         DrawAssetRows();
     }
@@ -261,6 +281,17 @@ public sealed partial class StudioForm
         StudioUi.Tip("Type");
     }
 
+    /** The filter menu beside a gear list's type filter. */
+    private void DrawGearFilters()
+    {
+        ImGui.SameLine();
+        if (StudioUi.IconButton("gear-filters", StudioIcon.Filter, "Filters")) ImGui.OpenPopup("gear-filters-menu");
+        if (!ImGui.BeginPopup("gear-filters-menu")) return;
+        if (ImGui.MenuItem("Hide Dummies", "", ref hideDummies)) FilterBrowser();
+        StudioUi.Tip("Display copies with no quality, weapon type or socket. A few look real and still show.");
+        ImGui.EndPopup();
+    }
+
     /** Categories with rows, grouped; counts come from the worker, so drawing scans no rows. */
     private void DrawCategoryHome()
     {
@@ -302,13 +333,18 @@ public sealed partial class StudioForm
         return clicked;
     }
 
-    /** Category rows show rarity colour and "Type . package", with no type that repeats the name; other rows show their kind. */
+    /**
+     * Category rows show rarity colour and "Type . package", with no type that repeats the name; other rows show their
+     * kind. An item or an icon asset leads with its icon, the height of both lines.
+     */
     private unsafe void DrawAssetRows()
     {
         bool inCategoryList = OpenCategory is not null;
         ImGui.BeginChild("asset-list", Vector2.Zero, ImGuiChildFlags.None);
         var clipper = new ImGuiListClipperPtr(ImGuiNative.ImGuiListClipper_ImGuiListClipper());
-        float rowHeight = ImGui.GetTextLineHeightWithSpacing() * 2 + 7 * scale;
+        float rowHeight = ImGui.GetTextLineHeightWithSpacing() * 2 + 7 * scale, icon = rowHeight - 8 * scale;
+        var investment = workspace.Investment;
+        bool wantsInvestment = false;
         clipper.Begin(filtered.Length, rowHeight);
         while (clipper.Step())
             for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++)
@@ -321,9 +357,22 @@ public sealed partial class StudioForm
                     workspace.Open(row.Entry.TagHash);
                 bool hovered = ImGui.IsItemHovered();
                 var draw = ImGui.GetWindowDrawList();
-                var textStart = start + new Vector2(7 * scale, 2 * scale);
+                bool itemRow = row.Names.TryGetItem(row.Entry.TagHash, out _);
+                bool iconRow = itemRow || InvestmentCatalog.IsIconAsset(row.Entry.Reference);
+                var textStart = start + new Vector2((iconRow ? 4 * scale + icon : 0) + 7 * scale, 2 * scale);
                 var end = start + new Vector2(ImGui.GetContentRegionAvail().X - 4, rowHeight);
                 draw.PushClipRect(start, end, true);
+                if (iconRow)
+                {
+                    // A frame-coloured square holds the place while the icon reads.
+                    var corner = start + new Vector2(4 * scale, scale);
+                    draw.AddRectFilled(corner, corner + new Vector2(icon), ImGui.GetColorU32(ImGuiCol.FrameBg));
+                    var shown = investment is null ? null : itemRow
+                        ? investment.FindItem(row.Entry.TagHash) is { } found ? ItemPreview.Shared?.Item(found) : null
+                        : ItemPreview.Shared?.Asset(row.Entry.TagHash);
+                    shown?.Draw(draw, corner, corner + new Vector2(icon));
+                    wantsInvestment |= investment is null;
+                }
                 string name = row.Name;
                 draw.AddText(textStart, row.Tier >= 0 ? ImGui.GetColorU32(StudioTheme.Rarity(row.Tier))
                     : ImGui.GetColorU32(ImGuiCol.Text), name);
@@ -336,8 +385,7 @@ public sealed partial class StudioForm
                 if (workspace.IsModified(row.Entry.TagHash))
                     draw.AddCircleFilled(new(end.X - 5, start.Y + 8), 3, ImGui.GetColorU32(StudioTheme.Accent));
                 draw.PopClipRect();
-                if (hovered)
-                    ImGui.SetTooltip($"{name}\n{row.Entry.PackageName}\n{row.Entry.TagHash:X8}");
+                if (hovered) AssetTooltip.Draw(row);
                 if (ImGui.BeginPopupContextItem("asset-context"))
                 {
                     if (ImGui.MenuItem("Open")) workspace.Open(row.Entry.TagHash);
@@ -351,6 +399,8 @@ public sealed partial class StudioForm
                 ImGui.PopID();
             }
         clipper.End(); clipper.Destroy();
+        // Icon rows ask for the investment catalog once a frame, not once a row.
+        if (wantsInvestment) workspace.RequestInvestment();
         ImGui.EndChild();
     }
 

@@ -49,7 +49,8 @@ public static partial class StudioCategories
             var (icon, tooltip) = ItemLooks.TryGetValue(name, out var look) ? look : (StudioIcon.Cube, name);
             bool model = name is InvestmentItemKinds.Armor or InvestmentItemKinds.Ghosts
                 or InvestmentItemKinds.Vehicles or InvestmentItemKinds.Ships;
-            categories.Add(new(name, name, ItemsGroup, icon, tooltip, ItemSections, ModelPane: model));
+            categories.Add(new(name, name, ItemsGroup, icon, tooltip, ItemSections, ModelPane: model,
+                OpenContext: name == InvestmentItemKinds.Armor ? tag => new AssetOpenContext { ArmorItemTag = tag } : null));
         }
         categories.Add(new(VendorsName, VendorsName, ItemsGroup, StudioIcon.Group, "Vendors and what they sell", ItemSections));
         categories.Add(new(PerksName, PerksName, ItemsGroup, StudioIcon.Build, "Perk gameplay programs",

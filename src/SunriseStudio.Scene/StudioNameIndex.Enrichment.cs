@@ -126,16 +126,21 @@ public sealed partial class StudioNameIndex
         }
     }
 
-    /** Bucket +184, tier +186; the objective +48, plug +64 and sack +88 blocks are set when non-zero. */
+    /**
+     * Bucket +184, tier +186; the objective +48, quality +72, plug +64 and sack +88 blocks are set when non-zero, the
+     * socket block +104 starts with the socket array, and +164 is FNV-1 of the weapon type, empty on other items.
+     */
     private static InvestmentItemFacts ItemFacts(TagData item, ushort index, uint hash, uint displayTag, string line)
     {
         if (!item.Has(180, 8)) throw new InvalidDataException("Item fixed fields are truncated.");
+        int sockets = item.I64(104) == 0 ? -1 : item.Relative(104);
         return new(index, hash, displayTag, item.U8(184), item.U8(186), line,
-            item.I64(48) != 0, item.I64(64) != 0, item.I64(88) != 0);
+            item.I64(48) != 0, item.I64(64) != 0, item.I64(88) != 0, item.I64(72) != 0,
+            item.Has(sockets, 8) && item.U64(sockets) != 0, item.U32(164) is not (0 or 0x811C9DC5));
     }
 
     private static InvestmentItemFacts UnreadItem(ushort index, uint hash, uint displayTag, string line) =>
-        new(index, hash, displayTag, UnreadByte, UnreadByte, line, false, false, false);
+        new(index, hash, displayTag, UnreadByte, UnreadByte, line, false, false, false, false, false, false);
 
     /**
      * Rereads one item's facts from its definition and display.

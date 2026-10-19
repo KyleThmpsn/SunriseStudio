@@ -11,7 +11,9 @@ public sealed class CreationDialog
     private const string PopupId = "###creation-workflow";
     private CreationWorkflow? workflow;
     private CreationFollowUp? followUp;
-    private bool open, anchoring, working, closing;
+    private bool open, anchoring, working, closing, showWarnings;
+    // Window sizes before scaling: the field form, and a workflow layout with columns side by side.
+    private static readonly Vector2 FormSize = new(720, 700), LayoutSize = new(1240, 880);
 
     public bool IsOpen => workflow is not null;
 
@@ -19,7 +21,7 @@ public sealed class CreationDialog
     public void Open(CreationWorkflow value)
     {
         workflow = value; followUp = null;
-        open = true; anchoring = working = closing = false;
+        open = true; anchoring = working = closing = showWarnings = false;
         CreationWidgets.Reset();
     }
 
@@ -39,8 +41,9 @@ public sealed class CreationDialog
         }
         if (open) { ImGui.OpenPopup(PopupId); open = false; }
         var display = ImGui.GetIO().DisplaySize;
+        var size = workflow.HasLayout ? LayoutSize : FormSize;
         ImGui.SetNextWindowPos(display * .5f, ImGuiCond.Appearing, new Vector2(.5f));
-        ImGui.SetNextWindowSize(new Vector2(Math.Min(720 * scale, display.X - 40), Math.Min(700 * scale, display.Y - 40)),
+        ImGui.SetNextWindowSize(new Vector2(Math.Min(size.X * scale, display.X - 40), Math.Min(size.Y * scale, display.Y - 40)),
             ImGuiCond.Appearing);
         // Only Cancel and finish end a workflow; a loading frame that closed the popup reopens it with the draft.
         if (!ImGui.BeginPopupModal(workflow.Title + PopupId, ImGuiWindowFlags.NoSavedSettings)) { open = true; return; }
@@ -48,6 +51,7 @@ public sealed class CreationDialog
         if (closing) { closing = false; workflow = null; ImGui.CloseCurrentPopup(); ImGui.EndPopup(); return; }
         workflow.Update(workspace);
         var problems = workflow.Problems(workspace);
+        if (workflow.HasLayout) { DrawLayout(workspace, scale, problems, pickFile); ImGui.EndPopup(); return; }
         int empty = problems.Count(IsEmptyRequired);
         string? first = problems.FirstOrDefault(problem => !IsEmptyRequired(problem));
         string allProblems = string.Join("\n", problems);
@@ -92,11 +96,60 @@ public sealed class CreationDialog
         StudioUi.Tip(allProblems);
         ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button(working ? "Close" : "Cancel", new Vector2(120 * scale, 0)))
-        { anchoring = working = false; followUp = null; workflow = null; ImGui.CloseCurrentPopup(); }
+        if (ImGui.Button(working ? "Close" : "Cancel", new Vector2(120 * scale, 0))) Cancel();
         if (working && ImGui.IsItemHovered()) ImGui.SetTooltip("The import continues in the background");
         if (anchoring || working) { ImGui.SameLine(); ImGui.TextDisabled("Working..."); }
         ImGui.EndPopup();
+    }
+
+    private void Cancel() { anchoring = working = false; followUp = null; workflow = null; ImGui.CloseCurrentPopup(); }
+
+    /**
+     * The workflow's own layout over a footer: problems block the action, warnings only show and
+     * list on a click, and the action sits at the right after Cancel.
+     */
+    private void DrawLayout(StudioWorkspace workspace, float scale, IReadOnlyList<string> problems,
+        Action<string, Action<string>> pickFile)
+    {
+        var warnings = workflow!.Limits;
+        float line = ImGui.GetTextLineHeightWithSpacing();
+        int lines = (problems.Count != 0 ? 1 : 0) + (warnings.Count != 0 ? 1 : 0) + (showWarnings ? warnings.Count : 0)
+            + (workspace.Error.Length != 0 ? 2 : 0);
+        float footer = lines * line + ImGui.GetFrameHeightWithSpacing() + ImGui.GetStyle().ItemSpacing.Y * 3;
+        ImGui.BeginChild("##layout", new Vector2(0, -footer), ImGuiChildFlags.None);
+        workflow.DrawLayout(workspace, pickFile);
+        ImGui.EndChild();
+        ImGui.Separator();
+        if (problems.Count != 0)
+        {
+            StudioUi.WarningIcon(StudioTheme.Problem);
+            ImGui.SameLine();
+            ImGui.TextColored(StudioTheme.Problem, problems.Count > 1 ? $"{problems[0]} (+{problems.Count - 1})" : problems[0]);
+            StudioUi.Tip(string.Join("\n", problems));
+        }
+        if (warnings.Count != 0)
+        {
+            StudioUi.WarningIcon(StudioTheme.Warning);
+            ImGui.SameLine();
+            string label = warnings.Count == 1 ? "1 Warning" : $"{warnings.Count} Warnings";
+            ImGui.PushStyleColor(ImGuiCol.Text, StudioTheme.Warning);
+            if (ImGui.Selectable(label, showWarnings, ImGuiSelectableFlags.None, ImGui.CalcTextSize(label))) showWarnings = !showWarnings;
+            ImGui.PopStyleColor();
+            StudioUi.Tip(showWarnings ? "" : string.Join("\n", warnings));
+            if (showWarnings)
+                foreach (string warning in warnings) { ImGui.Bullet(); ImGui.SameLine(); ImGui.TextUnformatted(warning); }
+        }
+        if (workspace.Error.Length != 0) { ImGui.PushTextWrapPos(0); ImGui.TextUnformatted(workspace.Error); ImGui.PopTextWrapPos(); }
+        // The footer's buttons are the form's width.
+        float button = 120 * scale, gap = ImGui.GetStyle().ItemSpacing.X;
+        if (anchoring || working) { ImGui.TextDisabled("Working..."); ImGui.SameLine(); }
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + Math.Max(0, ImGui.GetContentRegionAvail().X - button * 2 - gap));
+        if (ImGui.Button(working ? "Close" : "Cancel", new Vector2(button, 0))) { Cancel(); return; }
+        if (working && ImGui.IsItemHovered()) ImGui.SetTooltip("The import continues in the background");
+        ImGui.SameLine();
+        ImGui.BeginDisabled(problems.Count != 0 || workspace.IsBusy || anchoring || working);
+        if (StudioUi.Primary(workflow.CreateLabel, new Vector2(button, 0))) Start(workspace);
+        ImGui.EndDisabled();
     }
 
     /** Matches the text CreationField.Problems gives an empty required field. */
@@ -143,10 +196,12 @@ public sealed class CreationDialog
         }
     }
 
-    private static void DrawField(StudioWorkspace workspace, CreationField field, Action<string, Action<string>> pickFile)
+    /** Draws one field under its label; a layout that names the field itself passes labelled false. */
+    internal static void DrawField(StudioWorkspace workspace, CreationField field, Action<string, Action<string>> pickFile,
+        bool labelled = true)
     {
         ImGui.PushID(field.Label);
-        CreationWidgets.Label(field);
+        if (labelled) CreationWidgets.Label(field);
         float scale = CreationWidgets.Scale;
         if (field.Part is { } part)
         {

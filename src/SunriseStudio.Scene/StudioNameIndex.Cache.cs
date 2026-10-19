@@ -11,7 +11,7 @@ public sealed partial class StudioNameIndex
         string[] Diagnostics, int SdkFiles, GameNames Game, RenderNames Renderer);
 
     // Snapshot layout version; change it with the identity string whenever the layout changes.
-    private const int NameCacheFormat = 4;
+    private const int NameCacheFormat = 6;
 
     private bool sceneLabelsAdded;
     private readonly long initialOverlayRevision;
@@ -25,7 +25,7 @@ public sealed partial class StudioNameIndex
         string activities = Path.Combine(sdk, "lua", "activities"), scenarios = Path.Combine(sdk, "scenarios");
         var files = (Directory.Exists(activities) ? Directory.EnumerateFiles(activities, "*.lua") : [])
             .Concat(Directory.Exists(scenarios) ? Directory.EnumerateFiles(scenarios, "*.pack") : []);
-        return catalog.CreateCacheIdentity($"studio-names-v4:{typeof(StudioNameIndex).Module.ModuleVersionId}",
+        return catalog.CreateCacheIdentity($"studio-names-v6:{typeof(StudioNameIndex).Module.ModuleVersionId}",
             files, token);
     }
 
@@ -60,8 +60,8 @@ public sealed partial class StudioNameIndex
                 byte bucket = reader.Data.ReadByte(), tier = reader.Data.ReadByte();
                 string line = reader.Text();
                 byte blocks = reader.Data.ReadByte();
-                return new InvestmentItemFacts(index, hash, display, bucket, tier, line,
-                    (blocks & 1) != 0, (blocks & 2) != 0, (blocks & 4) != 0);
+                return new InvestmentItemFacts(index, hash, display, bucket, tier, line, (blocks & 1) != 0,
+                    (blocks & 2) != 0, (blocks & 4) != 0, (blocks & 16) != 0, (blocks & 8) != 0, (blocks & 32) != 0);
             });
             var owners = reader.Map(() => reader.Array(() =>
                 new OwnerLink(reader.Data.ReadUInt32(), reader.Text(), reader.Data.ReadInt32())));
@@ -113,7 +113,8 @@ public sealed partial class StudioNameIndex
             {
                 writer.Data.Write(facts.Index); writer.Data.Write(facts.Hash); writer.Data.Write(facts.DisplayTag);
                 writer.Data.Write(facts.Bucket); writer.Data.Write(facts.Tier); writer.Text(facts.TypeLine);
-                writer.Data.Write((byte)((facts.HasObjectives ? 1 : 0) | (facts.HasPlug ? 2 : 0) | (facts.HasSack ? 4 : 0)));
+                writer.Data.Write((byte)((facts.HasObjectives ? 1 : 0) | (facts.HasPlug ? 2 : 0) | (facts.HasSack ? 4 : 0)
+                    | (facts.HasSockets ? 8 : 0) | (facts.HasQuality ? 16 : 0) | (facts.HasWeaponType ? 32 : 0)));
             });
             writer.Map(owners, values => writer.Array(values, owner =>
             { writer.Data.Write(owner.Tag); writer.Text(owner.Role); writer.Data.Write(owner.Ordinal); }));

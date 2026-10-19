@@ -12,8 +12,11 @@ public sealed class InvestmentStatCurve
     public byte GroupIndex { get; }
     public uint GroupHash { get; }
     public IReadOnlyList<InvestmentStatPoint> Points { get; }
+    /** A linear stat shows a value no point names as it is. */
+    public bool Linear { get; }
 
-    public InvestmentStatCurve(byte statIndex, byte groupIndex, uint groupHash, IEnumerable<InvestmentStatPoint> points)
+    public InvestmentStatCurve(byte statIndex, byte groupIndex, uint groupHash, IEnumerable<InvestmentStatPoint> points,
+        bool linear = false)
     {
         ArgumentNullException.ThrowIfNull(points);
         this.points = points.Take(4097).ToArray();
@@ -29,14 +32,19 @@ public sealed class InvestmentStatCurve
                 || (long)point.Input - this.points[i - 1].Input > int.MaxValue))
                 throw new InvalidDataException("Stat display inputs must increase within the native interpolation range.");
         }
-        StatIndex = statIndex; GroupIndex = groupIndex; GroupHash = groupHash;
+        StatIndex = statIndex; GroupIndex = groupIndex; GroupHash = groupHash; Linear = linear;
         Points = new ReadOnlyCollection<InvestmentStatPoint>(this.points);
     }
 
-    /** Native interpolation uses float arithmetic, clamps its endpoints and rounds ties to even. */
+    /**
+     * A point naming the value gives its display; otherwise a linear stat or an empty curve keeps the value, and native
+     * interpolation uses float arithmetic, clamps its endpoints and rounds ties to even.
+     */
     public int Evaluate(int raw)
     {
-        if (points.Length == 0) return 0;
+        int exact = Array.FindIndex(points, point => point.Input == raw);
+        if (exact >= 0) return points[exact].Output;
+        if (Linear || points.Length == 0) return raw;
         float input = raw, value;
         if (input <= (float)points[0].Input) value = points[0].Output;
         else if (input >= (float)points[^1].Input) value = points[^1].Output;
@@ -85,14 +93,13 @@ public sealed partial class InvestmentCatalog
             {
                 int row = stats.Data + i * 24; byte stat = groups.U8(row);
                 if (!seen.Add(stat)) throw new InvalidDataException("Stat group contains duplicate stat rows.");
-                if (stat == 24)
-                { diagnostics.Add("Magazine display needs item context; the raw value remains editable."); continue; }
                 var curve = groups.Array(row + 8, 0x80807D1A, 8);
                 if (curve.Count > 4096) throw new InvalidDataException("Stat display point count is invalid.");
                 var points = new InvestmentStatPoint[curve.Count];
                 for (int j = 0; j < curve.Count; j++)
                     points[j] = new(groups.I32(curve.Data + j * 8), groups.I32(curve.Data + j * 8 + 4));
-                result.Add(stat, new(stat, groupIndex, groupHash, points));
+                // Row +3 marks a linear stat.
+                result.Add(stat, new(stat, groupIndex, groupHash, points, groups.U8(row + 3) == 1));
             }
         }
         catch (Exception error) when (Recoverable(error))

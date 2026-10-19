@@ -107,33 +107,41 @@ public static class InvestmentItemArt
         return Append(table, items: [table.Span.Slice(row, ItemStride).ToArray()]);
     }
 
-    /** A static item icon is one type-one field containing one container handle. */
-    public static uint ReadPrimaryIcon(ReadOnlyMemory<byte> table, int itemIndex)
+    /** An item's type-one field lists its icon's container, then the season watermark's when it has one. */
+    public static IReadOnlyList<uint> ReadIconContainers(ReadOnlyMemory<byte> table, int itemIndex)
     {
         var reader = new TagReader(table);
         var fields = Fields(reader, ItemOffset(reader, itemIndex));
-        int primary = PrimaryField(reader, fields);
+        int primary = PrimaryField(reader, fields), first = reader.I32(primary), count = reader.U8(primary + 5);
         var handles = reader.Array(HandlesField, HandleClass, 4);
-        int first = reader.I32(primary);
-        if (first < 0 || first >= handles.Count)
+        if (first < 0 || first > handles.Count - count)
             throw new InvalidDataException("The item art icon leaves the handle pool.");
-        return reader.U32(handles.Data + first * 4);
+        return [.. Enumerable.Range(first, count).Select(index => reader.U32(handles.Data + index * 4))];
     }
 
-    /** Changing one item copies its field list so shared source fields keep their old targets. */
+    /** A static item icon is the first container of its type-one field. */
+    public static uint ReadPrimaryIcon(ReadOnlyMemory<byte> table, int itemIndex) => ReadIconContainers(table, itemIndex)[0];
+
+    /** Changing one item copies its field list and handles so shared source fields keep their old targets. */
     public static byte[] SetPrimaryIcon(ReadOnlyMemory<byte> table, int itemIndex, uint containerTag)
     {
         if (containerTag is 0 or uint.MaxValue)
             throw new InvalidDataException("An item icon needs a container tag.");
-        if (ReadPrimaryIcon(table, itemIndex) == containerTag) return table.ToArray();
+        var containers = ReadIconContainers(table, itemIndex);
+        if (containers[0] == containerTag) return table.ToArray();
         var reader = new TagReader(table);
         int row = ItemOffset(reader, itemIndex);
         var fields = Fields(reader, row);
         int primary = PrimaryField(reader, fields);
         var handles = reader.Array(HandlesField, HandleClass, 4);
         var allFields = reader.Array(FieldsField, FieldClass, FieldStride);
-        byte[] handle = new byte[4];
-        BinaryPrimitives.WriteUInt32LittleEndian(handle, containerTag);
+        // The new icon takes the first handle; a watermark after it stays.
+        var added = containers.Select((tag, index) =>
+        {
+            byte[] handle = new byte[4];
+            BinaryPrimitives.WriteUInt32LittleEndian(handle, index == 0 ? containerTag : tag);
+            return handle;
+        }).ToArray();
         var copies = new List<byte[]>();
         for (int index = 0; index < fields.Count; index++)
         {
@@ -142,7 +150,7 @@ public static class InvestmentItemArt
             if (at == primary) BinaryPrimitives.WriteInt32LittleEndian(field, handles.Count);
             copies.Add(field);
         }
-        byte[] output = Append(table, handles: [handle], fields: copies);
+        byte[] output = Append(table, handles: added, fields: copies);
         int target = ItemOffset(new TagReader(output), itemIndex);
         BinaryPrimitives.WriteInt32LittleEndian(output.AsSpan(target + 8), allFields.Count);
         return output;
@@ -218,8 +226,8 @@ public static class InvestmentItemArt
         {
             int at = fields.Data + index * FieldStride;
             if (reader.U8(at + 4) != 1) continue;
-            if (result >= 0 || reader.U8(at + 5) != 1)
-                throw new NotSupportedException("Custom item icons need one primary art container.");
+            if (result >= 0 || reader.U8(at + 5) == 0)
+                throw new NotSupportedException("Custom item icons need one primary art field.");
             result = at;
         }
         return result >= 0 ? result : throw new NotSupportedException("The item has no primary art container.");

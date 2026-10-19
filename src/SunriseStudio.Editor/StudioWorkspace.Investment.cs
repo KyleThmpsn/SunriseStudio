@@ -48,6 +48,17 @@ public sealed partial class StudioWorkspace
         }, blocking: false, keepNotice: true);
     }
 
+    private long requestedInvestment = -1;
+
+    /** Starts LoadInvestment while none is current, once per package revision, so a failed read waits for the next. */
+    public void RequestInvestment()
+    {
+        if (Investment is not null || IsBusy || Catalog is not { } packages || requestedInvestment == packages.OverlayRevision)
+            return;
+        requestedInvestment = packages.OverlayRevision;
+        Run(LoadInvestment);
+    }
+
     private LocalizedStrings? investmentStrings;
     private string investmentStringStamp = "";
     // String container and English data classes; an overlay edit to either can change item text.
@@ -148,6 +159,28 @@ public sealed partial class StudioWorkspace
         uint display = data.FindVendor(document.Entry.TagHash)?.DisplayTag ?? 0;
         if (display == 0) throw new InvalidOperationException("This vendor has no display definition.");
         ApplyAssetEdits(edit(data, document.Entry.TagHash, document.Bytes, display, Catalog!.Read(display)), "Sale rows saved");
+    }
+
+    /**
+     * Rewrites sockets' choice lists as one edit, each list's first plug equipped, so a move between sockets undoes
+     * at once. A choice a socket's randomized pool lacks joins a pool of the item's own in the same edit.
+     */
+    public void SetInvestmentSockets(IReadOnlyList<(int Socket, IReadOnlyList<ushort> Plugs)> sockets)
+    {
+        RequireEditable();
+        var data = Investment ?? throw new InvalidOperationException("Load investment first.");
+        var document = Document ?? throw new InvalidOperationException("Choose an item.");
+        uint tag = document.Entry.TagHash, sets = new InvestmentSources().PlugSets;
+        byte[] edited = document.Bytes;
+        foreach (var (index, plugs) in sockets)
+            edited = data.SetSocketPlugs(tag, edited, data.ReadItem(tag, edited).Sockets[index],
+                [.. plugs.Select(plug => (plug, (ushort?)null))], plugs.FirstOrDefault(ushort.MaxValue));
+        var (definition, table) = Catalog!.ContainsTag(sets)
+            ? InvestmentPlugSets.FollowPools(edited, Catalog.ReadOriginal(sets), Catalog.Read(sets),
+                sockets.Select(socket => socket.Socket))
+            : (edited, null);
+        if (table is null) ApplyBytes(definition, "Investment rows saved");
+        else ApplyAssetEdits(new Dictionary<uint, byte[]> { [tag] = definition, [sets] = table }, "Investment rows saved");
     }
 
     /** Structural edits remain one undoable package delta. */

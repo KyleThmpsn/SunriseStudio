@@ -2,7 +2,10 @@ using System.Buffers.Binary;
 
 namespace SunriseStudio.Formats;
 
-/** A weapon config cloned for one weapon is retagged inside itself and in that weapon's gameplay root. */
+/**
+ * A weapon config cloned for one weapon is retagged inside itself and in that weapon's gameplay root. The weapon content
+ * config also holds the ammo type the weapon uses.
+ */
 public static class WeaponConfigEdits
 {
     /**
@@ -72,6 +75,52 @@ public static class WeaponConfigEdits
             if (U32(result, at) == source)
                 throw new InvalidDataException("The weapon root has an unclassified config reference.");
         return result;
+    }
+
+    // Root binding rows {u32 binding, u32 first descriptor | resource count << 16} at +72 select 24-byte descriptors
+    // {u32 config, u32 class, u64 offset in that config} at +104.
+    private const uint WeaponContentBinding = 0x5F0DD954, WeaponContentClass = 0x80803ACB, DescriptorClass = 0x80809C20;
+    private const int BindingsField = 72, BindingStride = 8, DescriptorsField = 104, DescriptorStride = 24;
+    // Weapon content names its definition {u32 config, u32 class, u64 offset}. The definition has its default property
+    // row at +128 and rows perks can select from the array at +576; a 448-byte row enables its ammo override at +52 and
+    // holds the zero-based ammo type at +53.
+    private const uint ContentDefinitionClass = 0x80803AC9, ContentPropertyClass = 0x80803ACF;
+    private const int DefaultProperties = 128, VariantProperties = 576, PropertyStride = 448, AmmoOverride = 52;
+
+    /** The config holding the weapon content a gameplay root binds, and the content's offset in it. */
+    public static (uint Config, int Content) WeaponContent(ReadOnlyMemory<byte> root)
+    {
+        var reader = new TagReader(root);
+        var bindings = reader.Array(BindingsField, stride: BindingStride);
+        int[] rows = [.. Enumerable.Range(0, bindings.Count).Select(index => bindings.Data + index * BindingStride)
+            .Where(row => reader.U32(row) == WeaponContentBinding)];
+        if (rows.Length != 1) throw new InvalidDataException("The weapon root needs one weapon content binding.");
+        uint selector = reader.U32(rows[0] + 4);
+        var descriptors = reader.Array(DescriptorsField, DescriptorClass, DescriptorStride);
+        int index = (int)(selector & 0xFFFF);
+        if ((selector >> 16 & 0x7FFF) != 1 || index >= descriptors.Count)
+            throw new InvalidDataException("The weapon content binding needs one descriptor.");
+        int descriptor = descriptors.Data + index * DescriptorStride;
+        if (reader.U32(descriptor + 4) != WeaponContentClass) throw new InvalidDataException("The weapon content has an unsupported class.");
+        return (reader.U32(descriptor), checked((int)reader.I64(descriptor + 8)));
+    }
+
+    /** Forces ammo type 1 Primary, 2 Special or 3 Heavy in the weapon content's default and variant property rows. */
+    public static byte[] SetAmmoOverride(ReadOnlyMemory<byte> config, uint configTag, int content, int ammo)
+    {
+        var reader = new TagReader(config);
+        if (!reader.Has(content, 16) || reader.U32(content) != configTag || reader.U32(content + 4) != ContentDefinitionClass)
+            throw new InvalidDataException("The weapon content does not name its definition in its own config.");
+        int definition = checked((int)reader.I64(content + 8));
+        if (!reader.Has(definition, VariantProperties + 16)) throw new InvalidDataException("The weapon content definition is truncated.");
+        var variants = reader.Array(definition + VariantProperties, ContentPropertyClass, PropertyStride);
+        int[] rows = [definition + DefaultProperties, .. Enumerable.Range(0, variants.Count).Select(index => variants.Data + index * PropertyStride)];
+        // Rows hold 0 or 1 and a type up to 2; anything else is a layout this editor does not know.
+        if (rows.Any(row => reader.U8(row + AmmoOverride) > 1 || reader.U8(row + AmmoOverride) == 1 && reader.U8(row + AmmoOverride + 1) > 2))
+            throw new InvalidDataException("A weapon content row has an unsupported ammo override.");
+        byte[] output = config.ToArray();
+        foreach (int row in rows) { output[row + AmmoOverride] = 1; output[row + AmmoOverride + 1] = checked((byte)(ammo - 1)); }
+        return output;
     }
 
     private static uint U32(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset));

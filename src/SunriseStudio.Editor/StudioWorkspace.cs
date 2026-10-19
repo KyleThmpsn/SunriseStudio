@@ -62,6 +62,8 @@ public sealed record StudioDocument(PackageEntry Entry, string Name, byte[] Byte
     public string Kind { get; init; } = "";
     /** The assembled guardian of a guardian view; null for every other document. */
     public PreparedGuardian? Guardian { get; init; }
+    /** The guardians an armor item can be previewed on; empty for every other document. */
+    public IReadOnlyList<ArmorWearer> Wearers { get; init; } = [];
 }
 
 /** Workers read assets; the window thread adopts results and owns project mutations. */
@@ -368,6 +370,8 @@ public sealed partial class StudioWorkspace : IDisposable
     {
         if (loadPreview && context is { Guardian: not null })
             return ReadGuardianDocument(catalog, entry, name, context);
+        if (loadPreview && context is { ArmorItemTag: > 0 })
+            return ReadArmorModelDocument(catalog, entry, name, context);
         if (loadPreview && context is { WeaponItemTag: > 0 })
             return context.WeaponEffectClipTag != 0
                 ? ReadWeaponEffectDocument(catalog, entry, name, context)

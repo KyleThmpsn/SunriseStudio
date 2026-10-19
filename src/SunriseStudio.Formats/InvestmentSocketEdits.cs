@@ -6,10 +6,10 @@ namespace SunriseStudio.Formats;
 public sealed partial class InvestmentCatalog
 {
     /** Ordinary socket blocks hold 80-byte rows and at most 12 instance lanes. */
-    private const uint SocketBlockClass = 0x808077C1, SocketRowClass = 0x808077C4;
+    private const uint SocketBlockClass = 0x808077C1;
     /** Embedded plug choices carry an item index and an expression array in 32 bytes. */
     private const uint SocketMemberClass = 0x80802E03, SocketExpressionClass = 0x80807D31;
-    private const int SocketStride = 80, SocketMemberStride = 32, SocketMemberDescriptor = 64;
+    private const int SocketMemberStride = 32;
 
     /** Only embedded choices provide a template that stays inside this item. */
     public IReadOnlyList<ushort> SocketPlugTemplates(uint tag, ReadOnlyMemory<byte> current,
@@ -71,7 +71,7 @@ public sealed partial class InvestmentCatalog
                 if (!preserveTemplateCondition) output.AsSpan(to + 8, 16).Clear();
             }
         }
-        int field = row + SocketMemberDescriptor;
+        int field = row + InvestmentSocketRows.Members;
         BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(field), count);
         BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(field + 8), header - field - 8L);
         BinaryPrimitives.WriteInt64LittleEndian(output, output.Length);
@@ -101,8 +101,8 @@ public sealed partial class InvestmentCatalog
             .Where(offset => reader.U32(offset) == plugIndex).ToArray();
         if (matches.Length != 1)
             throw new InvalidDataException("The retained plug must have one embedded member in this socket.");
-        if (members.Count == 1 && reader.U16(row + 12) == ushort.MaxValue
-            && reader.U16(row + 32) == ushort.MaxValue && socket.InitialPlug == plugIndex)
+        if (members.Count == 1 && reader.U16(row + InvestmentSocketRows.ReusableSet) == ushort.MaxValue
+            && reader.U16(row + InvestmentSocketRows.RandomizedSet) == ushort.MaxValue && socket.InitialPlug == plugIndex)
             return current.ToArray();
         int header = checked((current.Length + 19) & ~15);
         byte[] output = new byte[checked(header + 16 + SocketMemberStride)];
@@ -115,14 +115,78 @@ public sealed partial class InvestmentCatalog
         int expression = reader.Relative(source + 16);
         if (expression >= 0)
             BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(target + 16), expression - target - 16L);
-        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + 2), plugIndex);
-        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + 12), ushort.MaxValue);
-        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + 32), ushort.MaxValue);
-        BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(row + SocketMemberDescriptor), 1);
-        BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(row + SocketMemberDescriptor + 8),
-            header - row - SocketMemberDescriptor - 8L);
+        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + InvestmentSocketRows.InitialPlug), plugIndex);
+        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + InvestmentSocketRows.ReusableSet), ushort.MaxValue);
+        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + InvestmentSocketRows.RandomizedSet), ushort.MaxValue);
+        BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(row + InvestmentSocketRows.Members), 1);
+        BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(row + InvestmentSocketRows.Members + 8),
+            header - row - InvestmentSocketRows.Members - 8L);
         BinaryPrimitives.WriteInt64LittleEndian(output, output.Length);
         return output;
+    }
+
+    /**
+     * Makes a socket's choices exactly these plugs in this order, with the initial plug among them. A plug the socket
+     * embeds keeps its member and condition, a plug with an embedded template copies that member and its condition,
+     * and any other copies the first member with no condition. The socket stops drawing from its reusable plug set, so
+     * the list is all it comes with. Its randomized pool stays; InvestmentPlugSets.FollowPools adds new choices to it.
+     */
+    public byte[] SetSocketPlugs(uint tag, ReadOnlyMemory<byte> current, InvestmentSocket socket,
+        IReadOnlyList<(ushort Plug, ushort? Template)> plugs, ushort initial)
+    {
+        if (plugs.Count == 0) throw new InvalidDataException("A socket needs at least one plug.");
+        if (plugs.Count > MaximumAuthoredRows) throw new InvalidDataException("This socket has reached the editor's plug limit.");
+        if (plugs.Select(plug => plug.Plug).Distinct().Count() != plugs.Count)
+            throw new InvalidDataException("A plug appears twice in one socket.");
+        if (plugs.All(plug => plug.Plug != initial))
+            throw new InvalidDataException("The initial plug must be one of the socket's plugs.");
+        foreach (var (plug, _) in plugs) RequireSocketPlugIndex(plug);
+        var (reader, row) = ReadSocketForEdit(tag, current, socket);
+        var members = ReadSocketMembers(reader, row);
+        if (members.Count == 0) throw new InvalidDataException("This socket has no embedded plug choice to copy.");
+        int Member(ushort item) => Enumerable.Range(0, members.Count).Select(index => members.Data + index * SocketMemberStride)
+            .FirstOrDefault(offset => reader.U32(offset) == item, -1);
+        int header = checked((current.Length + 19) & ~15);
+        byte[] output = new byte[checked(header + 16 + plugs.Count * SocketMemberStride)];
+        current.Span.CopyTo(output);
+        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(header - 4), 0x80809FBD);
+        BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(header), plugs.Count);
+        current.Span.Slice(members.Data - 8, 8).CopyTo(output.AsSpan(header + 8));
+        for (int index = 0; index < plugs.Count; index++)
+        {
+            var (plug, template) = plugs[index];
+            int own = Member(plug), copied = template is { } item ? Member(item) : -1;
+            int from = own >= 0 ? own : copied >= 0 ? copied : members.Data, to = header + 16 + index * SocketMemberStride;
+            current.Span.Slice(from, SocketMemberStride).CopyTo(output.AsSpan(to));
+            int expression = reader.Relative(from + 16);
+            if (expression >= 0)
+                BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(to + 16), expression - to - 16L);
+            BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(to), plug);
+            // A plug with no member of its own or a template's carries no condition.
+            if (own < 0 && copied < 0) output.AsSpan(to + 8, 16).Clear();
+        }
+        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + InvestmentSocketRows.InitialPlug), initial);
+        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + InvestmentSocketRows.ReusableSet), ushort.MaxValue);
+        BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(row + InvestmentSocketRows.Members), plugs.Count);
+        BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(row + InvestmentSocketRows.Members + 8),
+            header - row - InvestmentSocketRows.Members - 8L);
+        BinaryPrimitives.WriteInt64LittleEndian(output, output.Length);
+        return output;
+    }
+
+    // Definition +64 points to the plug block, which opens with the category hash socket type whitelists name.
+    private const int PlugBlockField = 64, PlugCategoryField = 0;
+    private const uint PlugBlockClass = 0x808077E3;
+
+    /** The plug category hash of a plug item, or null for an item with no plug block. */
+    public static uint? ReadPlugCategory(ReadOnlyMemory<byte> definition)
+    {
+        var reader = new TagReader(definition);
+        if (!reader.Has(PlugBlockField, 8)) return null;
+        int block = reader.Relative(PlugBlockField);
+        if (block < 4 || !reader.Has(block, PlugCategoryField + 4)) return null;
+        if (reader.U32(block - 4) != PlugBlockClass) throw new InvalidDataException("Item plug block has an unsupported layout.");
+        return reader.U32(block + PlugCategoryField);
     }
 
     /** The caller's socket must still describe the current native row. */
@@ -135,18 +199,18 @@ public sealed partial class InvestmentCatalog
         var reader = new TagReader(current);
         if (!reader.Has(0, 188) || reader.U64(0) != (ulong)current.Length)
             throw new InvalidDataException("Item size header is invalid.");
-        int block = reader.Relative(104);
+        int block = reader.Relative(InvestmentSocketRows.Field);
         if (block < 4 || !reader.Has(block, 32) || reader.U32(block - 4) != SocketBlockClass)
             throw new InvalidDataException("Item socket block has an unsupported layout.");
-        var rows = reader.Array(block, SocketRowClass, SocketStride);
+        var rows = reader.Array(block, InvestmentSocketRows.RowClass, InvestmentSocketRows.Stride);
         if (rows.Count > 12 || socket.Index < 0 || socket.Index >= rows.Count)
             throw new InvalidDataException("Socket is outside the item's 12 ordinary lanes.");
-        int row = rows.Data + socket.Index * SocketStride;
+        int row = rows.Data + socket.Index * InvestmentSocketRows.Stride;
         var detail = ReadItem(tag, current);
         var actual = detail.Sockets.FirstOrDefault(value => value.Index == socket.Index);
         if (actual is null || actual.Type == ushort.MaxValue || actual.TypeField != socket.TypeField
             || actual.PlugField != socket.PlugField || actual.TypeField.Offset != row
-            || actual.PlugField.Offset != row + 2 || actual.Type != socket.Type
+            || actual.PlugField.Offset != row + InvestmentSocketRows.InitialPlug || actual.Type != socket.Type
             || actual.InitialPlug != socket.InitialPlug || !actual.AllowedPlugs.SequenceEqual(socket.AllowedPlugs))
             throw new InvalidDataException("This socket changed or is empty. Reopen its editor.");
         if (detail.Diagnostics.Any(message => message.StartsWith("Socket", StringComparison.Ordinal)))
@@ -157,7 +221,7 @@ public sealed partial class InvestmentCatalog
     /** Moved members keep their expressions at the original byte offsets. */
     private (int Count, int Data, uint Class) ReadSocketMembers(TagReader reader, int row)
     {
-        int field = row + SocketMemberDescriptor;
+        int field = row + InvestmentSocketRows.Members;
         var members = reader.Array(field, SocketMemberClass, SocketMemberStride);
         if (members.Count > MaximumAuthoredRows)
             throw new InvalidDataException("This socket has too many embedded plugs for the editor.");

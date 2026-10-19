@@ -28,6 +28,9 @@ public static partial class ProjectBuilder
         var result = new Dictionary<uint, uint>();
         var pending = new Queue<(uint Tag, byte[] Data)>(items.Where(item => item.Data.Length < 188 || item.Data[184] <= 2));
         var visited = new HashSet<uint>();
+        // A plug a project adds to a shared set reaches every socket naming that set, on installed weapons too.
+        if (edited.ContainsKey(SocketPlugSets))
+            foreach (int row in sharedRows) Members(sets, row + 8, SocketPlugSets);
         while (pending.TryDequeue(out var current))
         {
             var (owner, data) = current;

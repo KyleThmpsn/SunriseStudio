@@ -58,6 +58,8 @@ public sealed partial class StudioForm : Form
     private uint? adoptedMap;
     private StudioDocument? adoptedDocument;
     private bool changesOnly;
+    /** The Weapons and Armor lists leave out the display copies InvestmentItemKinds.IsDummy finds. */
+    private bool hideDummies = true;
     public string? Failure { get; private set; }
     public StudioPageRegistry Pages => pages;
     public StudioWorkspace Workspace => workspace;
@@ -99,7 +101,10 @@ public sealed partial class StudioForm : Form
         Text = $"Sunrise Studio {StudioVersion.Text}";
         chrome = new(this);
         Icon = studioIcon = StudioBrand.CreateIcon();
-        ClientSize = new Size(1540, 960);
+        // Four fifths of the screen's height, at least 960, in a 16:10 shape that fits the screen.
+        var area = Screen.FromPoint(MousePosition).WorkingArea;
+        int height = Math.Min(area.Height, Math.Max(960, area.Height * 4 / 5));
+        ClientSize = new Size(Math.Min(area.Width, height * 8 / 5), height);
         MinimumSize = new Size(1100, 720);
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
@@ -157,8 +162,20 @@ public sealed partial class StudioForm : Form
         gui.RebuildFonts(BodyFontPath, 16 * scale);
         gui.MakeCurrent();
         StudioTheme.Apply(scale);
+        Creation.CreationWidgets.Scale = scale;
         missionGraph.CodeFont = gui.MonospaceFont;
         foreach (var popout in popouts) popout.Rescale(scale);
+    }
+
+    /** Rebuilds the fonts when another game opens, since the asset tooltip is set in that game's own faces. */
+    private void ApplyGameFonts()
+    {
+        string? root = workspace.Catalog?.GameRoot;
+        if (gui is null || gui.GameRoot == root) return;
+        gui.GameRoot = root; gui.GameFontScale = AssetTooltip.Zoom;
+        gui.RebuildFonts(BodyFontPath, 16 * scale);
+        gui.MakeCurrent();
+        missionGraph.CodeFont = gui.MonospaceFont;
     }
 
     /** The initial picker stays open until the chosen folder resolves to installed packages. */
@@ -173,15 +190,22 @@ public sealed partial class StudioForm : Form
             gui = new ImGuiController(renderer, this, BodyFontPath, 16 * scale);
             missionGraph.CodeFont = gui.MonospaceFont;
             StudioTheme.Apply(scale);
+            // Widgets outside the creation dialog size by the same scale.
+            Creation.CreationWidgets.Scale = scale;
             viewport = new AssetViewport(renderer)
-                { UseGameShaders = settings.GameShaders, ShowGameShaderToggle = false, FullDetail = settings.FullDetail };
+            {
+                UseGameShaders = settings.GameShaders, ShowGameShaderToggle = false, FullDetail = settings.FullDetail,
+                ToolsPinned = settings.PreviewToolsPinned
+            };
             assetViewport = new AssetViewport(renderer)
                 { UseGameShaders = settings.GameShaders, ShowGameShaderToggle = false, FullDetail = settings.FullDetail };
             viewport.EffectControls = assetViewport.EffectControls = effectControls;
+            ItemPreview.Shared = new ItemPreview(renderer);
             viewport.ObjectName = source => ProjectName(source) ?? sceneTree?.Find(source)?.Name ?? SceneObjectName(source);
             assetViewport.ObjectName = SceneObjectName;
             viewport.ShowCursor = settings.ShowAssetCursor;
             assetViewport.ShowCursor = settings.ShowAssetCursor;
+            AssetViewport.FlatBackdrop = settings.FlatBackdrop;
             viewport.PreparationProgress = ReportPreparation;
             assetViewport.PreparationProgress = ReportPreparation;
             viewport.SelectionChanged += OnViewportSelection;
@@ -254,10 +278,14 @@ public sealed partial class StudioForm : Form
             assetViewport?.Animation?.Tick(0);
             UpdateLiveInspection();
             foreach (var page in pages.Pages.OfType<InvestmentPage>()) page.PrepareDetail(workspace, renderer);
+            ItemPreview.Shared?.Prepare(workspace.Investment);
             EditorReady = !setup && !workspace.IsBlocking && !browserPreparing && workspace.Catalog is not null
                 && viewport.Animation?.IsLoading != true && assetViewport?.Animation?.IsLoading != true;
             double now = clock.Elapsed.TotalSeconds;
             ApplyPendingDpi();
+            ApplyGameFonts();
+            // After both font rebuilds, so the tooltip never holds a font a rebuild freed.
+            AssetTooltip.Prepare(workspace, gui.GameFonts, scale);
             renderer.Resize(ClientSize.Width, ClientSize.Height);
             guiFrameActive = true;
             shownPage = null;
@@ -706,15 +734,26 @@ public sealed partial class StudioForm : Form
     {
         DrawCreationBar(document);
         string bar = shownPrefix + "pages";
+        bool hasView = document.Scene is not null || document.Texture is not null;
+        // The Preview editor, docked or in its own window, shows the view in place of the pages.
+        bool previewElsewhere = hasView && workspace.World is null
+            && (layout.Find(StudioPanelKind.Preview) is not null || IsPoppedOut(StudioPanelKind.Preview));
+        context = context with
+        {
+            PopOutPreview = () => pendingLayoutChange = () => OpenPopout(StudioPanelKind.Preview, null),
+            PreviewElsewhere = previewElsewhere,
+            PreviewChoice = width => DrawPreviewChoice(document, width)
+        };
         if (StudioCategories.ForKind(document.Kind) is not { } category)
         {
-            DrawPageTabs(bar, pages.Pages.Where(page => page.CanOpen(document)), shownPrefix, context);
+            DrawPageTabs(bar, pages.Pages.Where(page => page.CanOpen(document)
+                && !(previewElsewhere && page.Id == StudioCategories.PreviewPageId)), shownPrefix, context);
             return;
         }
-        bool hasView = document.Scene is not null || document.Texture is not null;
-        bool modelView = category.ModelPane && hasView;
+        bool modelView = category.ModelPane && hasView && !previewElsewhere;
         // The pane is the preview, so a request to show it is already met.
-        if (modelView && focusDocumentPage is { } focus && (focus.Equals(StudioCategories.PreviewPageId, StringComparison.OrdinalIgnoreCase)
+        if ((modelView || previewElsewhere) && focusDocumentPage is { } focus
+            && (focus.Equals(StudioCategories.PreviewPageId, StringComparison.OrdinalIgnoreCase)
             || focus.Equals("Scene", StringComparison.OrdinalIgnoreCase)))
             focusDocumentPage = null;
         if (category.ModelPane && !hasView && document.PreviewError.Length != 0)
@@ -722,7 +761,7 @@ public sealed partial class StudioForm : Form
             ImGui.TextDisabled("Model"); ImGui.SameLine(); ImGui.TextDisabled("not readable");
             StudioUi.Tip(document.PreviewError);
         }
-        var tabs = StudioCategories.Tabs(category, pages.Pages, document, modelView);
+        var tabs = StudioCategories.Tabs(category, pages.Pages, document, modelView || previewElsewhere);
         if (category.Sections.Length != 0 && !tabs.Any(page => page.Id == category.Sections[0]))
             ImGui.TextDisabled($"No {category.Label} view for this type");
         // A bar keeps its selected tab when the next document has that tab too.
@@ -738,11 +777,22 @@ public sealed partial class StudioForm : Form
         }
         var available = ImGui.GetContentRegionAvail();
         bool wide = available.X > 900 * scale;
-        ImGui.BeginChild("model-pane", wide ? new(available.X * .55f, available.Y)
-            : new(available.X, MathF.Max(150 * scale, available.Y * .45f)), ImGuiChildFlags.None);
-        pages.Pages.FirstOrDefault(page => page.Id == StudioCategories.PreviewPageId)?.Draw(context);
-        ImGui.EndChild();
-        if (wide) ImGui.SameLine();
+        float extent = wide ? available.X : available.Y, divider = 6 * scale;
+        float pane = MathF.Max(150 * scale, extent * settings.ModelPaneShare);
+        context.PreviewBox("model-pane", wide ? new(pane, available.Y) : new(available.X, pane),
+            () => pages.Pages.FirstOrDefault(page => page.Id == StudioCategories.PreviewPageId)?.Draw(context with { PreviewChoice = null }));
+        // The divider drags the pane's share; a double click returns it to the default.
+        if (wide) ImGui.SameLine(0, 0);
+        ImGui.InvisibleButton("model-pane-divider", wide ? new(divider, available.Y) : new(available.X, divider));
+        var delta = ImGui.GetIO().MouseDelta;
+        if (ImGui.IsItemActive()) settings.ModelPaneShare = Math.Clamp((pane + (wide ? delta.X : delta.Y)) / extent, .2f, .8f);
+        if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) settings.ModelPaneShare = .55f;
+        if (ImGui.IsItemHovered() || ImGui.IsItemActive())
+            ImGui.SetMouseCursor(wide ? ImGuiMouseCursor.ResizeEW : ImGuiMouseCursor.ResizeNS);
+        var line = ImGui.GetItemRectMin() + (wide ? new Vector2(divider / 2, 0) : new Vector2(0, divider / 2));
+        ImGui.GetWindowDrawList().AddLine(line, line + (wide ? new Vector2(0, available.Y) : new Vector2(available.X, 0)),
+            ImGui.GetColorU32(ImGui.IsItemActive() || ImGui.IsItemHovered() ? StudioTheme.Accent : StudioTheme.Panel), 2 * scale);
+        if (wide) ImGui.SameLine(0, 0);
         ImGui.BeginChild("category-pages", Vector2.Zero, ImGuiChildFlags.None);
         if (DrawPageTabs(bar, tabs, shownPrefix, context) is { } drawn) documentTab = (bar, drawn);
         ImGui.EndChild();
@@ -761,7 +811,10 @@ public sealed partial class StudioForm : Form
             {
                 shownPage = shownPrefix + page.Id;
                 drawn = page.Id;
+                // The tab bar stays in place while the page scrolls below it.
+                ImGui.BeginChild("page-" + page.Id, Vector2.Zero);
                 page.Draw(context);
+                ImGui.EndChild();
                 ImGui.EndTabItem();
             }
         ImGui.EndTabBar();
@@ -782,7 +835,11 @@ public sealed partial class StudioForm : Form
     private void DrawStatus(Vector2 position, Vector2 size)
     {
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(12, 5) * scale);
+        // A step darker than the panels, with a top edge, so the bar reads as the window's frame.
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, StudioTheme.Canvas);
         BeginPanel("Status", position, size, ImGuiWindowFlags.NoScrollbar);
+        ImGui.PopStyleColor();
+        ImGui.GetWindowDrawList().AddLine(position, position + new Vector2(size.X, 0), ImGui.GetColorU32(ImGuiCol.Border));
         if (workspace.IsBusy && !workspace.IsBlocking)
         {
             // A background command shows its stage and a moving bar in place of the status text.
@@ -828,6 +885,8 @@ public sealed partial class StudioForm : Form
     {
         closed = true;
         RememberCursorPreferences();
+        if (viewport is not null) settings.PreviewToolsPinned = viewport.ToolsPinned;
+        settings.FlatBackdrop = AssetViewport.FlatBackdrop;
         try { WriteFrameProfile(); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         { Failure ??= error.Message; }
@@ -838,6 +897,7 @@ public sealed partial class StudioForm : Form
         popouts.Clear();
         livePage.Dispose();
         foreach (var page in pages.Pages.OfType<IDisposable>()) page.Dispose();
+        ItemPreview.Shared?.Dispose(); ItemPreview.Shared = null;
         assetViewport?.Dispose(); viewport?.Dispose(); workspace.Dispose();
         loadingLogo?.Dispose(); toolbarLogo?.Dispose(); gui?.Dispose(); renderer?.Dispose(); studioIcon.Dispose();
         if (!options.Smoke)

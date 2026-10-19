@@ -112,7 +112,7 @@ public sealed class MaterialsPage : IPreparedStudioPage
             }
             ImGui.EndTable();
         }
-        if (additionalTextures.Length > 0 && ImGui.CollapsingHeader("Additional textures"))
+        if (additionalTextures.Length > 0 && ImGui.TreeNodeEx("Additional textures", StudioUi.Section))
             foreach (uint tag in additionalTextures)
             {
                 ImGui.PushID(unchecked((int)tag));
@@ -130,7 +130,7 @@ public sealed class MaterialsPage : IPreparedStudioPage
             foreach (var stage in new[] { execution.Vertex, execution.Pixel, execution.Compute })
             {
                 if (stage.Shader is null && stage.ConstantTemplate.Length == 0 && stage.TfxConstants.Length == 0) continue;
-                if (!ImGui.CollapsingHeader($"{stage.Stage} constants")) continue;
+                if (!ImGui.TreeNodeEx($"{stage.Stage} constants", StudioUi.Section)) continue;
                 ImGui.PushID($"{stage.Stage}");
                 DrawVectors("Material", stage.ConstantTemplate);
                 DrawVectors("Expressions", stage.TfxConstants);
@@ -213,7 +213,7 @@ public sealed class ShadersPage : IStudioPage
         ImGui.TextUnformatted($"{selected.Profile} / {selected.Bytecode.Length:N0} bytes");
         ImGui.SameLine();
         if (ImGui.SmallButton("Open bytecode")) context.Workspace.Select(selected.Shader.BytecodeTag);
-        if (ImGui.CollapsingHeader("Declarations"))
+        if (ImGui.TreeNodeEx("Declarations", StudioUi.Section))
             foreach (string declaration in selected.Declarations) ImGui.TextUnformatted(declaration);
         if (!ReferenceEquals(previous, selected))
         {

@@ -7,6 +7,10 @@ public sealed record AssetOpenContext(uint EntityTag = 0, uint ModelTag = 0, uin
     /** A weapon clip preview keeps its separate mechanical model and first-person rig. */
     public uint WeaponItemTag { get; init; }
 
+    /** An armor item opens with its own model in the preview, worn by the class body EntityTag names, or the first with art. */
+    public uint ArmorItemTag { get; init; }
+    public bool ArmorFemale { get; init; }
+
     /** Zero keeps the scene in its bind pose; a nonzero tag must belong to its animation owner. */
     public uint SelectedAnimationClipTag { get; init; }
 
