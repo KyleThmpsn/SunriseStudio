@@ -42,40 +42,48 @@ public sealed partial class InvestmentCatalog
         }, "Stats");
         Read(() =>
         {
-            int block = data.Relative(104);
+            int block = data.Relative(InvestmentSocketRows.Field);
             if (block < 0) return;
-            var rows = data.Array(block, 0x808077C4, 80);
+            var rows = data.Array(block, InvestmentSocketRows.RowClass, InvestmentSocketRows.Stride);
             if (rows.Count > 64) throw new InvalidDataException("Item declares too many socket lanes.");
             TagReader? sets = catalog.ContainsTag(sources.PlugSets) ? new(catalog.Read(sources.PlugSets)) : null;
             for (int i = 0; i < rows.Count; i++)
             {
-                int p = rows.Data + i * 80; ushort plug = data.U16(p + 2);
+                int p = rows.Data + i * InvestmentSocketRows.Stride; ushort plug = data.U16(p + InvestmentSocketRows.InitialPlug);
                 var allowed = new HashSet<ushort>();
                 if (plug < Items.Count) allowed.Add(plug);
-                void Members(TagReader source, int descriptor)
+                List<ushort> reusable = [], randomized = [];
+                (int, uint) randomizedSet = (-1, 0);
+                void Members(TagReader source, int descriptor, List<ushort>? list = null)
                 {
                     var members = source.Array(descriptor, stride: 32);
                     for (int row = 0; row < members.Count; row++)
                     {
                         uint index = source.U32(members.Data + row * 32);
-                        if (index < Items.Count) allowed.Add((ushort)index);
+                        if (index >= Items.Count) continue;
+                        allowed.Add((ushort)index);
+                        list?.Add((ushort)index);
                     }
                 }
-                Read(() => Members(data, p + 64), $"Socket {i} plug list");
+                Read(() => Members(data, p + InvestmentSocketRows.Members), $"Socket {i} plug list");
                 if (sets is not null)
                     Read(() =>
                     {
                         var shared = sets.Array(8, stride: 24);
-                        foreach (int field in new[] { 12, 32 })
+                        foreach (var (field, list) in new[]
+                            { (InvestmentSocketRows.ReusableSet, reusable), (InvestmentSocketRows.RandomizedSet, randomized) })
                         {
                             ushort set = data.U16(p + field);
                             if (set == ushort.MaxValue) continue;
                             if (set >= shared.Count) throw new InvalidDataException("Socket plug set is outside its index.");
-                            Members(sets, shared.Data + set * 24 + 8);
+                            Members(sets, shared.Data + set * 24 + 8, list);
+                            if (list == randomized) randomizedSet = (set, sets.U32(shared.Data + set * 24));
                         }
                     }, $"Socket {i} shared plugs");
                 sockets.Add(new(i, data.U16(p), plug, ItemName(plug), data.UShort("Socket type", p, true),
-                    data.UShort("Initial plug", p + 2, true), allowed.OrderBy(index => ItemName(index), StringComparer.OrdinalIgnoreCase).ToArray()));
+                    data.UShort("Initial plug", p + InvestmentSocketRows.InitialPlug, true),
+                    allowed.OrderBy(index => ItemName(index), StringComparer.OrdinalIgnoreCase).ToArray())
+                { ReusablePlugs = reusable, RandomizedPlugs = randomized, RandomizedSet = randomizedSet });
             }
         }, "Sockets");
         var curves = ReadDisplayCurves(item, errors);

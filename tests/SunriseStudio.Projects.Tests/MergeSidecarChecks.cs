@@ -5,7 +5,7 @@ using SunriseStudio.Packages;
 using SunriseStudio.Projects;
 
 /** Merge sidecars: the binary format, and what a build writes for a synthetic item index table. */
-internal static class MergeSidecarChecks
+internal static partial class MergeSidecarChecks
 {
     private const uint ItemIndex = 0x81327CCB, IndexClass = 0x80807BE4, IndexRowClass = 0x80807BE8;
     private const uint DisplayIndex = 0x81613CF1, DisplayIndexClass = 0x80805CDB, DisplayRowClass = 0x80805CDF;
@@ -18,6 +18,7 @@ internal static class MergeSidecarChecks
     {
         RoundTrip();
         Build(parent);
+        PlugSetBuild(parent);
     }
 
     /** Every record kind survives a write and a read; broken files are refused. */

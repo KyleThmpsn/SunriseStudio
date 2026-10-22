@@ -1,3 +1,4 @@
+using System.Globalization;
 using ImGuiNET;
 using SunriseStudio.Formats;
 using SunriseStudio.Projects;
@@ -7,6 +8,8 @@ namespace SunriseStudio.Editor;
 public sealed partial class InvestmentPage
 {
     private bool addingPerk, openAddRow;
+    /** The perk row the list replaces; null when it adds a row. */
+    private AssetProperty? replacingPerk;
     private string rowSearch = "";
     private int rowIndex = -1, rowValue;
     private StudioDocument? rowDocument;
@@ -27,26 +30,24 @@ public sealed partial class InvestmentPage
 
     private void ClearRow() { rowDocument = null; rowProject = null; openAddRow = false; }
 
-    private void AddRowButton(StudioPageContext context, bool perk)
-    {
-        ImGui.BeginDisabled(!context.Workspace.CanEdit);
-        if (ImGui.SmallButton(perk ? "+##perk" : "+##stat"))
-            BeginRow(context, perk);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(perk ? "Add perk" : "Add stat");
-        ImGui.EndDisabled();
-    }
-
     private void BeginRow(StudioPageContext context, bool perk)
     {
-        addingPerk = perk; rowIndex = -1; rowValue = 0; rowSearch = ""; openAddRow = true;
+        addingPerk = perk; replacingPerk = null; rowIndex = -1; rowValue = 0; rowSearch = ""; openAddRow = true;
         rowDocument = context.Workspace.Document; rowProject = context.Workspace.Project;
         rowOverlayRevision = context.Workspace.Catalog!.OverlayRevision;
+    }
+
+    /** The perk list, choosing what this perk row holds. */
+    private void BeginReplace(StudioPageContext context, AssetProperty perk)
+    {
+        BeginRow(context, true);
+        replacingPerk = perk;
     }
 
     /** A draft is tied to one document and project overlay. */
     private unsafe void DrawAddRow(StudioPageContext context, InvestmentCatalog catalog)
     {
-        string title = addingPerk ? "Add perk" : "Add stat";
+        string title = replacingPerk is not null ? "Replace perk" : addingPerk ? "Add perk" : "Add stat";
         if (openAddRow) { ImGui.OpenPopup(title); openAddRow = false; }
         if (!ImGui.BeginPopupModal(title, ImGuiWindowFlags.AlwaysAutoResize)) return;
         var workspace = context.Workspace;
@@ -69,7 +70,7 @@ public sealed partial class InvestmentPage
             if (rowValue == 0 && ImGui.IsItemHovered()) ImGui.SetTooltip("Zero uses the stat's level curve when one exists.");
         }
         ImGui.BeginDisabled(rowIndex < 0 || !workspace.CanEdit);
-        if (ImGui.Button("Add") && SaveRowDraft(workspace)) ImGui.CloseCurrentPopup();
+        if (ImGui.Button(replacingPerk is null ? "Add" : "Replace") && SaveRowDraft(workspace)) ImGui.CloseCurrentPopup();
         ImGui.EndDisabled(); ImGui.SameLine();
         if (ImGui.Button("Cancel")) Close();
         ImGui.EndPopup();
@@ -114,7 +115,9 @@ public sealed partial class InvestmentPage
      */
     private bool SaveRowDraft(StudioWorkspace workspace)
     {
-        if (addingPerk) workspace.Run(() => workspace.AddInvestmentPerk(checked((ushort)rowIndex)));
+        if (replacingPerk is { } field)
+            workspace.Run(() => workspace.ApplyInvestmentEdit(field, rowIndex.ToString(CultureInfo.InvariantCulture)));
+        else if (addingPerk) workspace.Run(() => workspace.AddInvestmentPerk(checked((ushort)rowIndex)));
         else workspace.Run(() => workspace.AddInvestmentStat(checked((byte)rowIndex), rowValue));
         if (workspace.Error.Length != 0) return false;
         ClearRow();

@@ -18,6 +18,9 @@ public static class InvestmentSocketTypes
     public const uint CategoryTable = 0x81319330;
     // Gameplay row +6 is the socket type's row in the category table.
     private const int CategoryField = 6, CategoryStride = 4;
+    // Gameplay row +35 is set on masterwork socket types: the stock sockets that use one start with Masterwork Upgrade,
+    // Masterwork or a tier plug, and no other socket has it.
+    private const int MasterworkField = 35;
     // The game's armor perks socket category, which holds an armor piece's stat roll and its traits.
     public const uint ArmorPerksCategory = 0x961B10E4;
 
@@ -38,6 +41,14 @@ public static class InvestmentSocketTypes
         var reader = new TagReader(gameplay);
         var rows = reader.Array(RowsField, stride: GameplayStride);
         return index < 0 || index >= rows.Count ? null : reader.U16(rows.Data + index * GameplayStride + CategoryField);
+    }
+
+    /** True when the socket type holds a masterwork. */
+    public static bool Masterwork(ReadOnlyMemory<byte> gameplay, int index)
+    {
+        var reader = new TagReader(gameplay);
+        var rows = reader.Array(RowsField, stride: GameplayStride);
+        return index >= 0 && index < rows.Count && gameplay.Span[rows.Data + index * GameplayStride + MasterworkField] != 0;
     }
 
     /** A socket type's socket category hash; null when the type or its category is outside its table. */

@@ -20,6 +20,10 @@ public sealed record PreparedWeaponTuning(uint ConfigTag, int TranslationGroup, 
     IReadOnlyList<ProjectAssetAddition> Assets, IReadOnlyDictionary<uint, byte[]> Changes,
     IReadOnlyDictionary<string, byte[]> AddedChanges);
 
+/** What an ammo type change adds and rewrites: the weapon's display, and its content copied or edited in place. */
+public sealed record PreparedWeaponAmmo(IReadOnlyList<ProjectAssetAddition> Assets, IReadOnlyDictionary<uint, byte[]> Changes,
+    IReadOnlyDictionary<string, byte[]> AddedChanges);
+
 /** One group a translation config offers: its index, its selector key and a type name installed weapons give it. */
 public sealed record WeaponTuningFamily(int Group, uint Key, string Name);
 
@@ -137,13 +141,9 @@ public static class WeaponTuningAuthoring
             if (Owned(project, current) is { } ownedConfig) addedChanges[ownedConfig.Id] = config;
             else
             {
-                uint Tag(int index) => checked(0x80800000u + ((uint)packageId << 13) + (uint)index);
-                if (firstEntry < 0 || firstEntry > 8191 || catalog.ContainsTag(Tag(firstEntry))
-                    || plannedAssets?.Any(asset => asset.Native is { } native && NativeTag(native) == Tag(firstEntry)) == true)
-                    throw new InvalidDataException("The translation config needs a free native entry.");
+                configTag = FreeEntry(catalog, packageId, firstEntry, plannedAssets, "The translation config");
                 var entry = catalog.TryGetEntry(current, out var found) ? found
                     : throw new InvalidDataException("The translation config is missing.");
-                configTag = Tag(firstEntry);
                 assets.Add(new(weapon.Name + ".translation", WeaponConfigEdits.RetagConfig(config, current, configTag).Bytes,
                     new(packageId, entry.Reference, entry.TypeInfo, null, firstEntry), WeaponTranslationEdits.SharedTranslation));
                 changes[root] = WeaponConfigEdits.RetagRoot(rootBytes, current, configTag);
@@ -173,6 +173,57 @@ public static class WeaponTuningAuthoring
 
         bool SharedOnlyBy(int index) => investment.Items.Where(item => item.DisplayTag != 0 && item.Tag != weapon.Tag)
             .All(item => InvestmentStatGroups.ReadDisplayGroup(Read(item.DisplayTag)) != index);
+    }
+
+    /**
+     * Sets the ammo type, 1 Primary, 2 Special or 3 Heavy, in the display and the weapon content. The first change clones
+     * the shared content config; later changes edit that copy in place.
+     */
+    public static PreparedWeaponAmmo PrepareAmmo(StudioProject project, PackageCatalog catalog, InvestmentItem weapon, int ammo,
+        ushort packageId, int firstEntry, IReadOnlyList<ProjectAssetAddition>? plannedAssets = null,
+        IReadOnlyDictionary<uint, byte[]>? edits = null)
+    {
+        byte[] Read(uint tag) => edits?.GetValueOrDefault(tag) ?? catalog.Read(tag);
+        if (!InvestmentAmmoType.Valid(ammo)) throw new InvalidDataException("Choose Primary, Special or Heavy ammo.");
+        ItemIconAuthoring.RequireProjectItem(project, catalog, weapon, plannedAssets);
+        uint root = WeaponArchetypeAuthoring.Read(catalog, Read(weapon.Tag)).EntityTag;
+        if (Owned(project, root) is null)
+            throw new InvalidDataException("The ammo type needs a project-authored weapon archetype.");
+        byte[] rootBytes = Read(root);
+        var (current, content) = WeaponConfigEdits.WeaponContent(rootBytes);
+        byte[] config = WeaponConfigEdits.SetAmmoOverride(Read(current), current, content, ammo);
+        var assets = new List<ProjectAssetAddition>();
+        var changes = new Dictionary<uint, byte[]>
+            { [weapon.DisplayTag] = InvestmentAmmoType.SetDisplay(Read(weapon.DisplayTag), ammo) };
+        var addedChanges = new Dictionary<string, byte[]>();
+        if (Owned(project, current) is { } owned) addedChanges[owned.Id] = config;
+        else
+        {
+            uint tag = FreeEntry(catalog, packageId, firstEntry, plannedAssets, "The weapon content");
+            var entry = catalog.TryGetEntry(current, out var found) ? found
+                : throw new InvalidDataException("The weapon content is missing.");
+            assets.Add(new(weapon.Name + ".content", WeaponConfigEdits.RetagConfig(config, current, tag).Bytes,
+                new(packageId, entry.Reference, entry.TypeInfo, null, firstEntry), current));
+            changes[root] = WeaponConfigEdits.RetagRoot(rootBytes, current, tag);
+        }
+        return new(assets, changes, addedChanges);
+    }
+
+    // A package's native entries run from 0 to this; an entry's tag is the package's tag base plus its index.
+    private const int LastEntry = 8191;
+
+    /** The tag of the project package's entry at this index, when it is valid and no installed or planned asset uses it. */
+    private static uint FreeEntry(PackageCatalog catalog, ushort packageId, int index,
+        IReadOnlyList<ProjectAssetAddition>? plannedAssets, string what)
+    {
+        if (index is >= 0 and <= LastEntry)
+        {
+            uint tag = 0x80800000u + ((uint)packageId << 13) + (uint)index;
+            if (!catalog.ContainsTag(tag)
+                && plannedAssets?.Any(asset => asset.Native is { } native && NativeTag(native) == tag) != true)
+                return tag;
+        }
+        throw new InvalidDataException($"{what} needs a free native entry.");
     }
 
     /** The type name installed weapons most often give each type key; cached per investment catalog. */

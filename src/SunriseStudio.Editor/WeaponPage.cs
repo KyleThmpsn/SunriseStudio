@@ -4,6 +4,7 @@ using System.Text.Json;
 using ImGuiNET;
 using SunriseStudio.Animation;
 using SunriseStudio.Authoring;
+using SunriseStudio.Editor.Creation;
 using SunriseStudio.Formats;
 using SunriseStudio.Packages;
 using SunriseStudio.Projects;
@@ -12,8 +13,8 @@ using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
-/** A named record the Weapon page opens. */
-public sealed record WeaponPageLink(string Name, uint Tag);
+/** A named record the Weapon page opens; a perk's link keeps its sandbox perk index for its icon, else -1. */
+public sealed record WeaponPageLink(string Name, uint Tag, int Perk = -1);
 
 /**
  * What the Weapon page shows for one weapon at one overlay revision.
@@ -126,7 +127,11 @@ public sealed record WeaponPageState(uint Weapon, long Overlay)
                 && !plug.Name.Contains("Empty", StringComparison.OrdinalIgnoreCase)) catalyst = plug;
             foreach (var perk in investment.ReadItem(plug.Tag, catalog.Read(plug.Tag)).Perks)
             {
-                try { links.Add(new(investment.PerkName(perk.Index), InvestmentSandboxPerkAuthoring.Read(catalog, perk.Index).GameplayTag)); }
+                try
+                {
+                    links.Add(new(investment.PerkName(perk.Index),
+                        InvestmentSandboxPerkAuthoring.Read(catalog, perk.Index).GameplayTag, perk.Index));
+                }
                 catch (InvalidDataException) { }
             }
         }
@@ -204,19 +209,27 @@ public sealed class WeaponPage : IStudioPage
         // Sections follow the project; busy work only disables their buttons, so the layout holds still.
         bool editable = workspace.Project is not null;
         var item = investment.FindItem(weapon);
-        ImGui.TextUnformatted(item?.Name ?? document.Name);
-        if (item?.Description is { Length: > 0 } description) StudioUi.Tip(description);
-        ImGui.SameLine();
-        ImGui.TextDisabled(item?.TypeName ?? "Weapon");
+        float line = ImGui.GetTextLineHeight();
+        if (item is not null && ItemPreview.Shared is { } preview)
+        {
+            ItemPreview.Draw(preview.Item(item), line * 2.4f);
+            ImGui.SameLine();
+        }
+        ImGui.BeginGroup();
+        StudioUi.Title(item?.Name ?? document.Name, item?.Description ?? "");
+        ImGui.TextColored(StudioTheme.Muted, item?.TypeName ?? "Weapon");
+        ImGui.EndGroup();
         if (state.Errors.Count != 0)
         {
+            StudioUi.WarningIcon(StudioTheme.Accent);
+            ImGui.SameLine();
             ImGui.TextColored(StudioTheme.Accent, "Some parts could not be read.");
-            StudioUi.Tip(string.Join("\n", state.Errors));
+            StudioUi.Tip("See Read Errors below.");
         }
 
         if (state.Art is { } art)
         {
-            StudioUi.Heading("Model");
+            StudioUi.Title("Model");
             // The weapon view already shows this model, or its failure note, beside the tabs.
             bool modelShown = document.OpenContext?.WeaponItemTag == weapon;
             if (!modelShown && StudioUi.IconButton("weapon-scene", StudioIcon.Cube, "Open the weapon scene", idle))
@@ -233,25 +246,28 @@ public sealed class WeaponPage : IStudioPage
                 if (StudioUi.IconButton("weapon-firing", StudioIcon.Spark, "Apply Muzzle, Eject and Reload emitters", idle))
                     PickFiringSource(workspace, weapon);
             }
-            if (ImGui.CollapsingHeader("Model parts")) DrawParts(workspace, art);
+            if (ImGui.TreeNodeEx($"Model Parts ({art.Variants.Count})###model-parts", StudioUi.Section))
+                DrawParts(workspace, art);
         }
 
         if (state.AnimationDefinition != 0 && state.Animations.Count != 0)
         {
-            StudioUi.Heading("Animation");
+            StudioUi.Title("Animation");
+            ImGui.SameLine();
+            if (StudioUi.IconButton("weapon-arms", StudioIcon.Export,
+                "Export first-person arms for Blender. A reimport applies them.\n" + StudioUi.MayNotWork,
+                idle && state.FireClip != 0 && state.ReloadClip != 0))
+                workspace.RequestWeaponArmsExport(state.FireClip, state.ReloadClip);
             ImGui.BeginDisabled(!workspace.CanEdit || !idle);
             DrawBinding(workspace, state, "Fire", WeaponPresentationAuthoring.FireSlot, state.FireClip);
             DrawBinding(workspace, state, "Reload", WeaponPresentationAuthoring.ReloadSlot, state.ReloadClip);
             ImGui.EndDisabled();
-            if (StudioUi.IconButton("weapon-arms", StudioIcon.Export,
-                "Export first-person arms for Blender. A reimport applies them.\n" + StudioUi.MayNotWork, idle && state.FireClip != 0 && state.ReloadClip != 0))
-                workspace.RequestWeaponArmsExport(state.FireClip, state.ReloadClip);
         }
 
         bool authored = editable && state.Receipt;
         if (authored || state.ClipBursts.Count != 0)
         {
-            StudioUi.Heading("Effects");
+            StudioUi.Title("Effects");
             if (authored)
             {
                 ImGui.TextUnformatted("Muzzle and Eject");
@@ -269,26 +285,32 @@ public sealed class WeaponPage : IStudioPage
             if (state.ClipBursts.Count != 0) DrawClipBursts(workspace, state);
         }
 
-        if (editable && state.Owned && ImGui.CollapsingHeader("Sounds")) DrawSounds(workspace, state);
+        if (editable && state.Owned && ImGui.TreeNodeEx("Sounds", StudioUi.Section)) DrawSounds(workspace, state);
 
-        StudioUi.Heading("Perks");
+        StudioUi.Title("Perks");
         if (state.Behaviors.Count == 0) ImGui.TextDisabled("No perk behavior linked.");
         ImGui.BeginDisabled(!idle);
+        float frame = ImGui.GetFrameHeight();
         foreach (var behavior in state.Behaviors)
         {
+            ItemPreview.Draw(behavior.Perk >= 0 ? ItemPreview.Shared?.Perk(behavior.Perk) : null, frame);
+            ImGui.SameLine();
             if (ImGui.Button(behavior.Name + "##" + behavior.Tag)) workspace.Run(() => workspace.Select(behavior.Tag));
             StudioUi.Tip("Open the perk's behavior graph");
         }
         ImGui.EndDisabled();
         if (state.Catalyst is { } catalyst)
         {
-            StudioUi.Heading("Catalyst");
-            if (StudioUi.IconButton("weapon-catalyst", StudioIcon.Open, "Open catalyst", idle))
-                workspace.Run(() => workspace.Select(catalyst.Tag));
+            StudioUi.Title("Catalyst");
+            ItemPreview.Draw(ItemPreview.Shared?.Item(catalyst), frame);
             ImGui.SameLine();
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(catalyst.Name);
+            ImGui.BeginDisabled(!idle);
+            if (ImGui.Button(catalyst.Name + "##catalyst")) workspace.Run(() => workspace.Select(catalyst.Tag));
+            StudioUi.Tip("Open catalyst");
+            ImGui.EndDisabled();
         }
+        if (state.Errors.Count != 0 && ImGui.TreeNodeEx($"Read Errors ({state.Errors.Count})###weapon-errors", StudioUi.Section))
+            StudioUi.Facts("weapon-errors", state.Errors);
     }
 
     private static void PickFiringSource(StudioWorkspace workspace, uint weapon)
@@ -401,8 +423,11 @@ public sealed class WeaponPage : IStudioPage
     private static void DrawBinding(StudioWorkspace workspace, WeaponPageState state, string label, int slot, uint current)
     {
         string selected = state.Animations.FirstOrDefault(clip => clip.Tag == current)?.Name ?? "Existing clip";
-        ImGui.SetNextItemWidth(230);
-        if (!ImGui.BeginCombo(label, selected)) { StudioUi.Tip("Clip this action plays."); return; }
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(label);
+        ImGui.SameLine(ImGui.GetFontSize() * 4);
+        ImGui.SetNextItemWidth(230 * CreationWidgets.Scale);
+        if (!ImGui.BeginCombo("##" + label, selected)) { StudioUi.Tip("Clip this action plays."); return; }
         foreach (var clip in state.Animations)
             if (ImGui.Selectable(clip.Name, clip.Tag == current))
                 workspace.Run(() => workspace.BindWeaponAnimation(state.AnimationDefinition, slot, clip.Tag));

@@ -11,7 +11,9 @@ public sealed class CreationDialog
     private const string PopupId = "###creation-workflow";
     private CreationWorkflow? workflow;
     private CreationFollowUp? followUp;
-    private bool open, anchoring, working, closing;
+    private bool open, anchoring, working, closing, showLimits;
+    // Window sizes before scaling: the field form, and a workflow layout with columns side by side.
+    private static readonly Vector2 FormSize = new(720, 700), LayoutSize = new(1240, 880);
 
     public bool IsOpen => workflow is not null;
 
@@ -19,7 +21,7 @@ public sealed class CreationDialog
     public void Open(CreationWorkflow value)
     {
         workflow = value; followUp = null;
-        open = true; anchoring = working = closing = false;
+        open = true; anchoring = working = closing = showLimits = false;
         CreationWidgets.Reset();
     }
 
@@ -39,8 +41,9 @@ public sealed class CreationDialog
         }
         if (open) { ImGui.OpenPopup(PopupId); open = false; }
         var display = ImGui.GetIO().DisplaySize;
+        var size = workflow.HasLayout ? LayoutSize : FormSize;
         ImGui.SetNextWindowPos(display * .5f, ImGuiCond.Appearing, new Vector2(.5f));
-        ImGui.SetNextWindowSize(new Vector2(Math.Min(720 * scale, display.X - 40), Math.Min(700 * scale, display.Y - 40)),
+        ImGui.SetNextWindowSize(new Vector2(Math.Min(size.X * scale, display.X - 40), Math.Min(size.Y * scale, display.Y - 40)),
             ImGuiCond.Appearing);
         // Only Cancel and finish end a workflow; a loading frame that closed the popup reopens it with the draft.
         if (!ImGui.BeginPopupModal(workflow.Title + PopupId, ImGuiWindowFlags.NoSavedSettings)) { open = true; return; }
@@ -48,6 +51,7 @@ public sealed class CreationDialog
         if (closing) { closing = false; workflow = null; ImGui.CloseCurrentPopup(); ImGui.EndPopup(); return; }
         workflow.Update(workspace);
         var problems = workflow.Problems(workspace);
+        if (workflow.HasLayout) { DrawLayout(workspace, scale, problems, pickFile); ImGui.EndPopup(); return; }
         int empty = problems.Count(IsEmptyRequired);
         string? first = problems.FirstOrDefault(problem => !IsEmptyRequired(problem));
         string allProblems = string.Join("\n", problems);
@@ -92,11 +96,84 @@ public sealed class CreationDialog
         StudioUi.Tip(allProblems);
         ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button(working ? "Close" : "Cancel", new Vector2(120 * scale, 0)))
-        { anchoring = working = false; followUp = null; workflow = null; ImGui.CloseCurrentPopup(); }
+        if (ImGui.Button(working ? "Close" : "Cancel", new Vector2(120 * scale, 0))) Cancel();
         if (working && ImGui.IsItemHovered()) ImGui.SetTooltip("The import continues in the background");
         if (anchoring || working) { ImGui.SameLine(); ImGui.TextDisabled("Working..."); }
         ImGui.EndPopup();
+    }
+
+    private void Cancel() { anchoring = working = false; followUp = null; workflow = null; ImGui.CloseCurrentPopup(); }
+
+    /**
+     * The workflow's own layout over a one-line footer: what blocks the action, then the count of the workflow's limits
+     * as warnings, which list on a hover and open above the line on a click, then Cancel and the action at the right.
+     */
+    private void DrawLayout(StudioWorkspace workspace, float scale, IReadOnlyList<string> problems,
+        Action<string, Action<string>> pickFile)
+    {
+        var limits = workflow!.Limits;
+        int empty = problems.Count(IsEmptyRequired);
+        string? first = problems.FirstOrDefault(problem => !IsEmptyRequired(problem));
+        string allProblems = string.Join("\n", problems), allLimits = string.Join("\n", limits);
+        int lines = (showLimits ? limits.Count : 0) + (workspace.Error.Length != 0 ? 2 : 0);
+        float footer = lines * ImGui.GetTextLineHeightWithSpacing() + ImGui.GetFrameHeightWithSpacing()
+            + ImGui.GetStyle().ItemSpacing.Y * 3;
+        ImGui.BeginChild("##layout", new Vector2(0, -footer), ImGuiChildFlags.None);
+        workflow.DrawLayout(workspace, pickFile);
+        ImGui.EndChild();
+        ImGui.Separator();
+        if (showLimits)
+            foreach (string limit in limits)
+            {
+                StudioUi.WarningIcon(StudioTheme.Warning);
+                ImGui.SameLine();
+                ImGui.TextColored(StudioTheme.Warning, limit);
+            }
+        if (workspace.Error.Length != 0)
+        { ImGui.PushTextWrapPos(0); ImGui.TextUnformatted(workspace.Error); ImGui.PopTextWrapPos(); }
+        // The footer's buttons are the form's width.
+        float button = 120 * scale, gap = ImGui.GetStyle().ItemSpacing.X, start = ImGui.GetCursorPosX();
+        float buttons = start + Math.Max(0, ImGui.GetContentRegionAvail().X - button * 2 - gap);
+        bool lead = false;
+        ImGui.AlignTextToFramePadding();
+        // A blocking problem reads in full colour; empty required fields, which their fields already mark, only count.
+        if (first is not null)
+        {
+            StudioUi.WarningIcon(StudioTheme.Problem, framed: true);
+            ImGui.SameLine();
+            int more = problems.Count - 1;
+            ImGui.TextColored(StudioTheme.Problem, StudioUi.Fit(more > 0 ? $"{first} (+{more})" : first,
+                buttons - ImGui.GetCursorPosX() - gap * 5 - ImGui.GetTextLineHeight()
+                - ImGui.CalcTextSize($"{limits.Count} Warnings").X));
+            StudioUi.Tip(allProblems);
+            lead = true;
+        }
+        else if (empty != 0)
+        {
+            ImGui.TextDisabled(empty == 1 ? "1 required field empty" : $"{empty} required fields empty");
+            StudioUi.Tip(allProblems);
+            lead = true;
+        }
+        if (limits.Count != 0)
+        {
+            if (lead) ImGui.SameLine(0, gap * 3);
+            StudioUi.WarningIcon(StudioTheme.Warning, framed: true);
+            ImGui.SameLine();
+            ImGui.TextColored(StudioTheme.Warning, limits.Count == 1 ? "1 Warning" : $"{limits.Count} Warnings");
+            if (ImGui.IsItemHovered()) ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            if (ImGui.IsItemClicked()) showLimits = !showLimits;
+            StudioUi.Tip(showLimits ? "" : allLimits);
+            lead = true;
+        }
+        if (anchoring || working) { if (lead) ImGui.SameLine(0, gap * 3); ImGui.TextDisabled("Working..."); lead = true; }
+        if (lead) ImGui.SameLine();
+        ImGui.SetCursorPosX(buttons);
+        if (ImGui.Button(working ? "Close" : "Cancel", new Vector2(button, 0))) { Cancel(); return; }
+        if (working && ImGui.IsItemHovered()) ImGui.SetTooltip("The import continues in the background");
+        ImGui.SameLine();
+        ImGui.BeginDisabled(problems.Count != 0 || workspace.IsBusy || anchoring || working);
+        if (StudioUi.Primary(workflow.CreateLabel, new Vector2(button, 0))) Start(workspace);
+        ImGui.EndDisabled();
     }
 
     /** Matches the text CreationField.Problems gives an empty required field. */
@@ -143,10 +220,12 @@ public sealed class CreationDialog
         }
     }
 
-    private static void DrawField(StudioWorkspace workspace, CreationField field, Action<string, Action<string>> pickFile)
+    /** Draws one field under its label; a layout that names the field itself passes labelled false. */
+    internal static void DrawField(StudioWorkspace workspace, CreationField field, Action<string, Action<string>> pickFile,
+        bool labelled = true)
     {
         ImGui.PushID(field.Label);
-        CreationWidgets.Label(field);
+        if (labelled) CreationWidgets.Label(field);
         float scale = CreationWidgets.Scale;
         if (field.Part is { } part)
         {

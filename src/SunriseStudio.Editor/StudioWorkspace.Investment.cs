@@ -162,6 +162,40 @@ public sealed partial class StudioWorkspace
         ApplyAssetEdits(edit(data, document.Entry.TagHash, document.Bytes, display, Catalog!.Read(display)), "Sale rows saved");
     }
 
+    /**
+     * Rewrites sockets' choice lists as one edit, each list's first plug equipped, so a move between sockets undoes
+     * at once. A choice a socket's randomized pool lacks joins a pool of the item's own in the same edit.
+     */
+    public void SetInvestmentSockets(IReadOnlyList<(int Socket, IReadOnlyList<InvestmentSocketChoice> Plugs)> sockets)
+    {
+        RequireEditable();
+        var data = Investment ?? throw new InvalidOperationException("Load investment first.");
+        var document = Document ?? throw new InvalidOperationException("Choose an item.");
+        uint tag = document.Entry.TagHash, sets = new InvestmentSources().PlugSets;
+        byte[] edited = document.Bytes;
+        foreach (var (index, plugs) in sockets)
+            edited = data.SetSocketPlugs(tag, edited, data.ReadItem(tag, edited).Sockets[index],
+                plugs, plugs.Count == 0 ? ushort.MaxValue : plugs[0].Plug, document.Bytes);
+        var (definition, table) = Catalog!.ContainsTag(sets)
+            ? InvestmentPlugSets.FollowPools(edited, Catalog.ReadOriginal(sets), Catalog.Read(sets),
+                sockets.Select(socket => socket.Socket))
+            : (edited, null);
+        if (table is null) ApplyBytes(definition, "Investment rows saved");
+        else ApplyAssetEdits(new Dictionary<uint, byte[]> { [tag] = definition, [sets] = table }, "Investment rows saved");
+    }
+
+    /** Gives a socket a randomized pool of its own with exactly these plugs, in roll order, as one edit. */
+    public void SetInvestmentPool(int socket, IReadOnlyList<ushort> plugs)
+    {
+        RequireEditable();
+        var document = Document ?? throw new InvalidOperationException("Choose an item.");
+        uint sets = new InvestmentSources().PlugSets;
+        var (definition, table) = InvestmentPlugSets.SetPool(document.Bytes, Catalog!.ReadOriginal(sets), Catalog.Read(sets),
+            socket, plugs);
+        ApplyAssetEdits(new Dictionary<uint, byte[]> { [document.Entry.TagHash] = definition, [sets] = table },
+            "Investment rows saved");
+    }
+
     /** Structural edits remain one undoable package delta. */
     private void ApplyInvestmentRows(Func<InvestmentCatalog, uint, ReadOnlyMemory<byte>, byte[]> edit)
     {

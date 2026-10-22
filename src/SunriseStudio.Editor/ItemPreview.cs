@@ -96,13 +96,17 @@ public sealed class ItemIcon(IReadOnlyList<GpuTexture> layers) : IDisposable
     }
 }
 
-/** Item, perk and icon asset icons, read on the thread pool and uploaded between frames; the browser and tooltips draw them. */
+/**
+ * Item, perk and icon asset icons, read on the thread pool and uploaded between frames, and the open weapon's model in
+ * a preview viewport of its own; item pages, the browser and tooltips draw them.
+ */
 public sealed class ItemPreview : IDisposable
 {
     /** The window's previews; null until it has a renderer. */
     public static ItemPreview? Shared { get; set; }
 
     private readonly Dx11Renderer renderer;
+    private readonly AssetViewport preview;
     /** What an icon key's index counts: items, sandbox perks, rows of the icon table or icon asset tags. */
     private enum Source { Item, Perk, Row, Asset }
     private readonly Dictionary<(Source Source, int Index), ItemIcon?> icons = [];
@@ -116,8 +120,14 @@ public sealed class ItemPreview : IDisposable
     private readonly Dictionary<(Source Source, int Index), long> drawn = [];
     private long frame;
     private InvestmentCatalog? investment;
+    private SceneDocument? scene;
+    private double seconds;
 
-    public ItemPreview(Dx11Renderer renderer) => this.renderer = renderer;
+    public ItemPreview(Dx11Renderer renderer)
+    {
+        this.renderer = renderer;
+        preview = new AssetViewport(renderer) { ShowCursor = false, ShowGrid = false };
+    }
 
     /**
      * Uploads the icons read since the last frame and releases the least recently drawn past the cache size; a new
@@ -193,6 +203,91 @@ public sealed class ItemPreview : IDisposable
         icon?.Draw(ImGui.GetWindowDrawList(), at, at + new Vector2(size));
     }
 
+    // The card's icon before scaling.
+    private const float CardIcon = 52;
+
+    /**
+     * An item as a card across the width: its icon, its name with its hash, its type line, and an action at the
+     * bottom right. A right click copies the hash.
+     * @return True when the action was clicked.
+     */
+    public bool Card(InvestmentItem item, string action, float scale)
+    {
+        var style = ImGui.GetStyle();
+        var draw = ImGui.GetWindowDrawList();
+        var at = ImGui.GetCursorScreenPos();
+        float width = ImGui.GetContentRegionAvail().X, icon = CardIcon * scale, height = icon + 2 * scale;
+        // A step lighter than the panel, so the card reads as one thing.
+        var panel = style.Colors[(int)ImGuiCol.WindowBg];
+        draw.AddRectFilled(at, at + new Vector2(width, height),
+            ImGui.GetColorU32(new Vector4(panel.X + 14 / 255f, panel.Y + 14 / 255f, panel.Z + 14 / 255f, 1)));
+        Item(item)?.Draw(draw, at + new Vector2(0, scale), at + new Vector2(icon, icon + scale));
+        float left = icon + style.ItemSpacing.X, title = ImGui.GetFontSize() * 1.1f;
+        string hash = item.Hash.ToString("X8", CultureInfo.InvariantCulture);
+        float hashWidth = ImGui.CalcTextSize(hash).X, right = width - style.FramePadding.X;
+        draw.AddText(at + new Vector2(right - hashWidth, 4 * scale), ImGui.GetColorU32(ImGuiCol.TextDisabled), hash);
+        draw.PushClipRect(at, at + new Vector2(right - hashWidth - style.ItemSpacing.X, height), true);
+        draw.AddText(ImGui.GetFont(), title, at + new Vector2(left, 4 * scale), ImGui.GetColorU32(ImGuiCol.Text), item.Name);
+        draw.PopClipRect();
+        draw.AddText(at + new Vector2(left, 4 * scale + title + 2 * scale), ImGui.GetColorU32(ImGuiCol.Text), item.TypeName);
+        float button = ImGui.CalcTextSize(action).X + style.FramePadding.X * 2;
+        ImGui.InvisibleButton("##card", new(Math.Max(1, width - button - style.ItemSpacing.X), height));
+        if (ImGui.BeginPopupContextItem("##card-menu"))
+        {
+            if (ImGui.MenuItem("Copy Hash")) ImGui.SetClipboardText(hash);
+            ImGui.EndPopup();
+        }
+        ImGui.SetCursorScreenPos(at + new Vector2(width - button, height - ImGui.GetFrameHeight() - scale));
+        bool clicked = ImGui.Button(action);
+        ImGui.SetCursorScreenPos(at + new Vector2(0, height + style.ItemSpacing.Y));
+        ImGui.Dummy(new(width, 0));
+        return clicked;
+    }
+
+    /**
+     * An icon and a name inside a frame-high control at a screen position, as a plug button shows its plug.
+     * @param draw The list of the window that holds the control, which a combo's open popup does not change.
+     */
+    public static void Label(ImDrawListPtr draw, Vector2 at, float width, ItemIcon? icon, string text)
+    {
+        var style = ImGui.GetStyle();
+        float frame = ImGui.GetFrameHeight(), inset = 2 * frame / 24, size = frame - inset * 2;
+        icon?.Draw(draw, at + new Vector2(inset), at + new Vector2(inset + size));
+        float left = inset + size + style.FramePadding.X;
+        draw.PushClipRect(at, at + new Vector2(width, frame), true);
+        draw.AddText(at + new Vector2(left, style.FramePadding.Y), ImGui.GetColorU32(ImGuiCol.Text), text);
+        draw.PopClipRect();
+    }
+
+    /**
+     * The open document's model, turning on drag and zooming on the wheel; false when it has no model to show, so the
+     * caller can stand its icon in. An open world stays out of it.
+     */
+    public bool DrawModel(StudioWorkspace workspace, Vector2 size)
+    {
+        if (workspace.Document?.Scene is not { } shown || size.X < 1 || size.Y < 1) return false;
+        if (!ReferenceEquals(shown, scene))
+        {
+            preview.Clear();
+            preview.Catalog = workspace.Catalog;
+            preview.SetScene(shown);
+            preview.Frame();
+            scene = shown;
+        }
+        seconds += ImGui.GetIO().DeltaTime;
+        var image = preview.RenderImage(Math.Max(1, (int)size.X), Math.Max(1, (int)size.Y), seconds);
+        var origin = ImGui.GetCursorScreenPos();
+        ImGui.InvisibleButton("##model-preview", size);
+        if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left, 0))
+            preview.Camera.Orbit(ImGui.GetIO().MouseDelta.X, ImGui.GetIO().MouseDelta.Y);
+        if (ImGui.IsItemHovered() && ImGui.GetIO().MouseWheel != 0) preview.Camera.Zoom(ImGui.GetIO().MouseWheel);
+        var draw = ImGui.GetWindowDrawList();
+        float rounding = ImGui.GetStyle().FrameRounding;
+        draw.AddRectFilled(origin, origin + size, ImGui.GetColorU32(new Vector4(.055f, .065f, .08f, 1)), rounding);
+        draw.AddImageRounded(image.ImGuiId, origin, origin + size, Vector2.Zero, Vector2.One, uint.MaxValue, rounding);
+        return true;
+    }
+
     private void DisposeIcons()
     {
         foreach (var icon in icons.Values) icon?.Dispose();
@@ -200,5 +295,9 @@ public sealed class ItemPreview : IDisposable
         generation++;
     }
 
-    public void Dispose() => DisposeIcons();
+    public void Dispose()
+    {
+        DisposeIcons();
+        preview.Dispose();
+    }
 }

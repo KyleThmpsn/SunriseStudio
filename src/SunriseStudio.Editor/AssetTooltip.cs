@@ -84,6 +84,8 @@ public static class AssetTooltip
     }
 
     private static readonly Dictionary<uint, Entry> Entries = [];
+    /** Plug descriptions read from their perks, by plug tag. */
+    private static readonly Dictionary<uint, Task<string>> PerkTexts = [];
     private static StudioWorkspace? workspace;
     private static InvestmentCatalog? source;
     private static GameFonts? fonts;
@@ -94,7 +96,7 @@ public static class AssetTooltip
     public static void Prepare(StudioWorkspace current, GameFonts? faces, float uiScale)
     {
         workspace = current; fonts = faces; scale = uiScale * Zoom; frame++;
-        if (!ReferenceEquals(source, current.Investment)) { Entries.Clear(); source = current.Investment; }
+        if (!ReferenceEquals(source, current.Investment)) { Entries.Clear(); PerkTexts.Clear(); source = current.Investment; }
         // The least recently drawn go first; a removed entry's worker finishes unread.
         var stale = Entries.OrderBy(pair => pair.Value.Drawn).Take(Entries.Count - CachedItems).Select(pair => pair.Key);
         foreach (uint tag in stale.ToList()) Entries.Remove(tag);
@@ -158,6 +160,18 @@ public static class AssetTooltip
         End(description.Length != 0 && !figures || notice.Length != 0 && !perks || figureLast);
     }
 
+    /** A plug's tooltip, smaller than an item's: its band, the package line, then its description, else its perks'. */
+    public static void DrawPlug(InvestmentItem plug)
+    {
+        string package = workspace?.Catalog is { } catalog && catalog.TryGetEntry(plug.Tag, out var entry)
+            ? entry.PackageName : "";
+        // The plug's figure and stats read as the item tooltip reads them, on a worker the first time.
+        var work = workspace?.Investment is not null && workspace.Catalog is not null ? Request(plug).Work : null;
+        DrawSmall(plug.Name, plug.TypeName, plug.Tier, plug.Bucket, ItemPreview.Shared?.NoIcon(plug) != true,
+            ItemPreview.Shared?.Item(plug), package, plug.Tag, PlugDescription(plug),
+            work?.IsCompletedSuccessfully == true ? work.Result : null);
+    }
+
     /** A sandbox perk's tooltip in the plug's form, its index where a plug names its package, then its definition hash. */
     public static void DrawPerk(int perk, string name)
     {
@@ -191,6 +205,19 @@ public static class AssetTooltip
         // A plug's values are what it changes, so they carry their sign.
         if (stats) { Gap(); DrawStats(content!, width, signed: true); }
         End(!stats && (description.Length != 0 || content?.Lockup is not null));
+    }
+
+    /** A plug's own description, else its perks' in order, each once; mods often leave their own blank. */
+    public static string PlugDescription(InvestmentItem plug)
+    {
+        if (!string.IsNullOrWhiteSpace(plug.Description) || workspace?.Investment is not { } investment
+            || workspace.Catalog is not { } catalog) return plug.Description;
+        if (!PerkTexts.TryGetValue(plug.Tag, out var work))
+            PerkTexts.Add(plug.Tag, work = Task.Run(() => string.Join("\n\n",
+                investment.ReadItem(plug.Tag, catalog.Read(plug.Tag)).Perks
+                .Select(perk => perk.Index < investment.PerkCount ? investment.PerkDefinitions[perk.Index].Description : "")
+                .Where(text => !string.IsNullOrWhiteSpace(text)).Distinct())));
+        return work.IsCompletedSuccessfully ? work.Result : "";
     }
 
     private static void Begin()

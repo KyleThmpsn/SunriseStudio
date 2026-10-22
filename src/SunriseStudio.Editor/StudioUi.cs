@@ -1,11 +1,12 @@
 using System.Numerics;
 using ImGuiNET;
+using SunriseStudio.Editor.Creation;
 using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
 /** Small shared widgets: WIP tags, help marks, tooltips, icon buttons and fact tables. */
-public static class StudioUi
+public static partial class StudioUi
 {
     public const string MayNotWork = "May not work in game.";
     public const string MayBeInaccurate = "May be inaccurate.";
@@ -53,6 +54,21 @@ public static class StudioUi
         ImGui.BeginDisabled(!enabled);
         bool clicked = ImGuiIcons.Button(id, icon, tooltip);
         ImGui.EndDisabled();
+        return clicked && enabled;
+    }
+
+    /** A small frameless icon on a control's line, grey until hovered, for row actions such as remove. */
+    public static bool RowIconButton(string id, StudioIcon icon, string tooltip, bool enabled = true)
+    {
+        float frame = ImGui.GetFrameHeight(), size = ImGui.GetTextLineHeight() * .75f;
+        var at = ImGui.GetCursorScreenPos();
+        ImGui.BeginDisabled(!enabled);
+        bool clicked = ImGui.InvisibleButton("##" + id, new(frame, frame));
+        ImGui.EndDisabled();
+        bool hovered = enabled && ImGui.IsItemHovered();
+        Tip(tooltip);
+        ImGuiIcons.Draw(ImGui.GetWindowDrawList(), icon, at + new Vector2((frame - size) / 2), size,
+            ImGui.GetColorU32(hovered ? ImGuiCol.Text : ImGuiCol.TextDisabled));
         return clicked && enabled;
     }
 
@@ -121,7 +137,7 @@ public static class StudioUi
     }
 
     /** The text, or its longest prefix that fits with "..." added. */
-    private static string Fit(string text, float width)
+    internal static string Fit(string text, float width)
     {
         if (width <= 0 || ImGui.CalcTextSize(text).X <= width) return text;
         int low = 0, high = text.Length;
@@ -132,5 +148,75 @@ public static class StudioUi
             else high = middle - 1;
         }
         return text[..low].TrimEnd() + "...";
+    }
+
+    /** A folding section: a quiet tree row that does not indent what it opens. */
+    public const ImGuiTreeNodeFlags Section = ImGuiTreeNodeFlags.SpanAvailWidth | ImGuiTreeNodeFlags.NoTreePushOnOpen;
+
+    /** A section heading a step above body text; a dot follows once the section holds a change. */
+    public static void Title(string text, string hint = "", bool changed = false)
+    {
+        var at = ImGui.GetCursorScreenPos();
+        ImGui.Dummy(ImGui.CalcTextSize(text) * 1.2f);
+        Tip(hint);
+        ImGui.GetWindowDrawList().AddText(ImGui.GetFont(), ImGui.GetFontSize() * 1.2f, at, ImGui.GetColorU32(ImGuiCol.Text),
+            text);
+        if (!changed) return;
+        // A drawn dot: the UI font has no bullet glyph.
+        ImGui.SameLine(0, 6 * CreationWidgets.Scale);
+        var dot = ImGui.GetCursorScreenPos();
+        float radius = 3 * CreationWidgets.Scale, line = ImGui.GetTextLineHeight() * 1.2f;
+        ImGui.Dummy(new(radius * 2, line));
+        Tip("Changed");
+        ImGui.GetWindowDrawList().AddCircleFilled(dot + new Vector2(radius, line * .55f), radius,
+            ImGui.GetColorU32(ImGuiCol.Text));
+    }
+
+    /** The badge a conditional stat or perk row carries, and what it explains. */
+    public const string ConditionalBadge = "Conditional", ConditionalTip = "Active only while its condition holds.";
+
+    /** The width Badge takes for this text. */
+    public static float BadgeWidth(string text) => ImGui.CalcTextSize(text).X * .8f + 10 * CreationWidgets.Scale;
+
+    /** A few words in a faint box with a hairline border and slight corners. */
+    public static void Badge(string text, string tip = "")
+    {
+        var extent = ImGui.CalcTextSize(text) * .8f;
+        var padding = new Vector2(5, 1) * CreationWidgets.Scale;
+        var box = extent + padding * 2;
+        var at = ImGui.GetCursorScreenPos();
+        float line = ImGui.GetTextLineHeight();
+        ImGui.Dummy(new(box.X, line));
+        Tip(tip);
+        var min = new Vector2(at.X, at.Y + (line - box.Y) * .5f);
+        var draw = ImGui.GetWindowDrawList();
+        draw.AddRectFilled(min, min + box, ImGui.GetColorU32(ImGuiCol.FrameBg), 3 * CreationWidgets.Scale);
+        draw.AddRect(min, min + box, ImGui.GetColorU32(ImGuiCol.Border), 3 * CreationWidgets.Scale);
+        draw.AddText(ImGui.GetFont(), ImGui.GetFontSize() * .8f, min + padding, ImGui.GetColorU32(ImGuiCol.Text), text);
+    }
+
+    /** The one action a window leads to, in the accent fill. */
+    public static bool Primary(string label, Vector2 size)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Button, StudioTheme.Accent * new Vector4(.85f, .85f, .85f, 1));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, StudioTheme.Accent);
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, StudioTheme.Accent);
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 1, 1, 1));
+        bool clicked = ImGui.Button(label, size);
+        ImGui.PopStyleColor(4);
+        return clicked;
+    }
+
+    /**
+     * A warning glyph on the text line, in a severity colour.
+     * @param framed Centres it on a line of buttons, where AlignTextToFramePadding lowers the text beside it.
+     */
+    public static void WarningIcon(Vector4 color, bool framed = false)
+    {
+        float line = ImGui.GetTextLineHeight(), height = framed ? ImGui.GetFrameHeight() : line;
+        var at = ImGui.GetCursorScreenPos() + new Vector2(0, (height - line) / 2);
+        ImGui.Dummy(new(line, height));
+        ImGuiIcons.Draw(ImGui.GetWindowDrawList(), StudioIcon.Warning, at + new Vector2(line * .1f), line * .8f,
+            ImGui.GetColorU32(color));
     }
 }

@@ -12,7 +12,7 @@ using SunriseStudio.Viewport;
 namespace SunriseStudio.Editor.Creation;
 
 /** A clone of an installed item of one category, or edits to an existing item, with its strings and index rows. */
-public sealed class ItemWorkflow : CreationWorkflow
+public sealed partial class ItemWorkflow : CreationWorkflow
 {
     private sealed class StatDraft { public int Source = -1; public byte Index; public int Value; public bool Remove; }
     private sealed class PerkDraft { public int Source = -1; public ushort Index; public bool Remove; }
@@ -21,6 +21,10 @@ public sealed class ItemWorkflow : CreationWorkflow
     [
         new(0, "None"), new(1, "Common"), new(2, "Uncommon"), new(3, "Rare"), new(4, "Legendary"), new(5, "Exotic"), new(255, "Unset")
     ];
+    private static readonly CreationChoice[] DamageTypes =
+        [.. InvestmentDamageType.Names.Select((name, value) => new CreationChoice((uint)value, name))];
+    private static readonly CreationChoice[] AmmoTypes =
+        [.. InvestmentAmmoType.Names.Select((name, index) => new CreationChoice((uint)index + 1, name))];
     private readonly StudioWorkspace workspace;
     private readonly string category;
     private readonly bool weapon;
@@ -28,7 +32,8 @@ public sealed class ItemWorkflow : CreationWorkflow
     private readonly InvestmentSources sources = new();
     private readonly CreationField baseItem, name, description, weaponType, package, icon, customIcon, perkIcon, hudIcon,
         fireRate, damagePerShot, magazineSize, reticle, reticleTexture, tier, bucket, stats, perks, sockets, collection,
-        loreTitle, loreSubtitle, loreText, frameName, frameDescription, frameIcon, family, gameplay, weaponOnly;
+        loreTitle, loreSubtitle, loreText, frameName, frameDescription, frameIcon, family, gameplay, weaponOnly, exoticLimit,
+        sharedSets, damageType, ammoType;
     // A frame socket allows this plug category, on stock and project weapons alike.
     private const uint FrameCategory = 0x67FBA961;
     // Definition pointers to the objective, plug and sack blocks; zero means no block.
@@ -38,6 +43,17 @@ public sealed class ItemWorkflow : CreationWorkflow
     /** False when the base display has no perk display block, so it can carry no perks. */
     private bool perkBlock = true;
     private bool authoredWeapon;
+    /** Whether the item carries its kind's one-exotic label now; null when it cannot carry one. */
+    private bool? loadedLimit;
+    /** The Rarity the exotic limit last followed. */
+    private string limitTier = "";
+    /** The installed plug a plug clone or project plug copies; shared sets that list it can take the copy. */
+    private InvestmentItem? setBase;
+    private bool inSetsNow;
+    /** The Damage type the perk drafts last took. */
+    private string damageApplied = "";
+    /** The ammo type the weapon's display shows now; null when it has none. */
+    private int? loadedAmmo;
     private (IReadOnlyDictionary<string, BrowserAsset[]>? Source, BrowserAsset[] Rows) allItemRows = (null, []);
     private InvestmentItem? framePlug;
     private bool frameOwned;
@@ -64,6 +80,8 @@ public sealed class ItemWorkflow : CreationWorkflow
     private string detailError = "", preflightProblem = "", preflightKey = "";
     private StringBankTemplate? stringTemplate;
     private readonly List<string> notes = [];
+    /** Why the weapon's damage type cannot change here, for its tile's hover; empty when it can. */
+    private string damageWhy = "";
     private long requestedOverlay = -1;
     private uint newStat;
     private int newStatValue;
@@ -175,6 +193,13 @@ public sealed class ItemWorkflow : CreationWorkflow
             Visible = false,
             Hint = "Blank keeps the current size."
         };
+        ammoType = new("Ammo type", CreationFieldKind.Scalar, false,
+            "display +320 u16 and the override at +52 of each property row in the weapon's own weapon content")
+        {
+            Visible = false, Choices = () => AmmoTypes,
+            Evidence = "The weapon content's override sets the ammo the weapon uses; the display only shows it.",
+            Hint = "Stats and reserves stay as they are. " + StudioUi.MayNotWork
+        };
         frameName = new("Frame name", CreationFieldKind.Text, false, "intrinsic plug display +132 {u32 bank, u32 hash}")
         {
             Visible = false,
@@ -203,6 +228,12 @@ public sealed class ItemWorkflow : CreationWorkflow
         };
         tier = new("Rarity", CreationFieldKind.Scalar, false, "definition +186 u8")
         { Choices = () => Rarities, Evidence = "The investment editor edits this field; the catalog reads it as rarity." };
+        exoticLimit = new("Exotic equip limit", CreationFieldKind.Scalar, false, "equipment block +16 unique-equip label")
+        {
+            Visible = false, Choices = () => [new(0, "Off"), new(1, "One at a Time")],
+            Evidence = "Stock exotic weapons and armor carry the exotic_weapon and exotic_armor labels; other items carry none.",
+            Hint = "Rarity sets this. Change it afterwards to override. " + StudioUi.MayNotWork
+        };
         bucket = new("Inventory bucket", CreationFieldKind.Scalar, false, "definition +184 u8")
         {
             Choices = BucketChoices, Visible = !mods,
@@ -210,15 +241,21 @@ public sealed class ItemWorkflow : CreationWorkflow
             Hint = "Buckets this category uses."
         };
         stats = new("Base stats", CreationFieldKind.Rows, false, "definition stats block, 40-byte stat rows")
-        { DrawRows = DrawStats, Evidence = "The investment editor adds, removes and edits these rows." };
+        { Evidence = "The investment editor adds, removes and edits these rows." };
+        damageType = new("Damage type", CreationFieldKind.Scalar, false, "marker sandbox perk in the definition's perk rows")
+        {
+            Visible = false, Choices = () => DamageTypes,
+            Evidence = "Stock fixed-damage weapons carry one of six marker perks; Kinetic weapons carry none.",
+            Hint = "Swaps the weapon's marker perk in Sandbox perks. " + StudioUi.MayNotWork
+        };
         perks = new("Sandbox perks", CreationFieldKind.Rows, false, "definition stats block, 24-byte perk rows")
         {
-            DrawRows = DrawPerks, Part = new("New perk", "Only exotic New registers new perks", []),
+            Part = new("New perk", "Only exotic New registers new perks", []),
             Evidence = "The investment editor adds and removes these rows."
         };
         sockets = new("Socket plugs", CreationFieldKind.Rows, false, "definition socket rows +2 u16 initial plug")
         {
-            DrawRows = DrawSockets, Visible = !mods, Part = new("New plug", "Clone a plug in Mods and plugs first", []),
+            Visible = !mods, Part = new("New plug", "Clone a plug in Mods and plugs first", []),
             Evidence = "Project plugs copied from an embedded choice keep that choice's conditions."
         };
         collection = new("Collections", CreationFieldKind.Scalar, false,
@@ -227,6 +264,13 @@ public sealed class ItemWorkflow : CreationWorkflow
             Choices = CollectionChoices, Visible = edit is null, Text = "0",
             Evidence = "A collectible names its item by index at +44; a node lists its collectibles at +120.",
             Hint = "Defaults to the base item's page."
+        };
+        sharedSets = new("Shared plug sets", CreationFieldKind.Scalar, false, "plug set 0x81319349 member rows, item index at +0")
+        {
+            Visible = false, Text = "0",
+            Choices = () => [new(0, "Not Added"), new(1, "Added beside the Base Plug")],
+            Evidence = "Sunrise builds each socket's choices from its embedded plugs and its reusable plug set.",
+            Hint = "Sockets that offer the base plug offer the copy. Sets a socket rolls from are skipped. " + StudioUi.MayNotWork
         };
         if (edit is not null)
         {
@@ -237,10 +281,11 @@ public sealed class ItemWorkflow : CreationWorkflow
 
     public override string Title => (editing is null ? "Clone " : "Edit ") + CreationTypes.ItemNoun(category);
     public override string CreateLabel => editing is null ? "Create" : "Save changes";
+    public override bool HasLayout => true;
     public override IReadOnlyList<CreationField> Fields =>
         [baseItem, name, description, weaponType, frameName, frameDescription, frameIcon, loreTitle, loreSubtitle, loreText,
-            package, collection, icon, perkIcon, weaponOnly, hudIcon, family, fireRate, damagePerShot, magazineSize, gameplay,
-            reticle, reticleTexture, tier, bucket, stats, perks, sockets];
+            package, collection, sharedSets, icon, perkIcon, weaponOnly, hudIcon, family, fireRate, damagePerShot, magazineSize,
+            ammoType, gameplay, reticle, reticleTexture, tier, exoticLimit, bucket, stats, damageType, perks, sockets];
     public override uint? AnchorTag => baseItem.Tag;
     public override CreationField? CloneSource => editing is null ? baseItem : null;
 
@@ -317,14 +362,20 @@ public sealed class ItemWorkflow : CreationWorkflow
         }
         if (baseItem.Tag != loadedBase) LoadBase(workspace.Investment);
         Preflight(workspace);
+        // Each Rarity change sets the limit: on for Exotic, rarity 5, and off for the rest.
+        if (exoticLimit.Visible && tier.Text != limitTier)
+        { limitTier = tier.Text; exoticLimit.Text = tier.Text == "5" ? "1" : "0"; }
+        if (damageType.Visible && damageType.Text != damageApplied) ApplyDamageType(workspace.Investment);
     }
 
     /** Drafts restart from the chosen item's current rows. */
     private void LoadBase(InvestmentCatalog investment)
     {
         loadedBase = baseItem.Tag; source = null; detail = null; detailBytes = []; detailError = ""; notes.Clear();
-        perkBlock = true;
-        statDrafts.Clear(); perkDrafts.Clear(); plugDrafts.Clear();
+        damageWhy = ""; perkBlock = true; loadedLimit = null; exoticLimit.Visible = false; setBase = null;
+        inSetsNow = false; sharedSets.Visible = false;
+        damageType.Visible = false;
+        statDrafts.Clear(); perkDrafts.Clear(); plugDrafts.Clear(); socketLists.Clear();
         if (baseItem.Tag is not { } tag) return;
         try
         {
@@ -336,11 +387,31 @@ public sealed class ItemWorkflow : CreationWorkflow
             plugItem = category == InvestmentItemKinds.Mods || Block(PlugBlock);
             bucket.Visible = sockets.Visible = !plugItem;
             perkIcon.Visible = editing is not null && plugItem;
+            setBase = SetBase(investment);
+            inSetsNow = editing is not null && setBase is not null
+                && InvestmentPlugSets.SetsWith(workspace.Catalog!.Read(sources.PlugSets), source.Index).Count != 0;
+            sharedSets.Visible = setBase is not null;
+            sharedSets.Text = inSetsNow ? "1" : "0";
             tier.Text = detail.Item.Tier.ToString(CultureInfo.InvariantCulture);
+            // Plugs, ornaments among them, can sit in a weapon or armor bucket but never equip.
+            try { loadedLimit = plugItem ? null : InvestmentEquippingBlock.ReadExoticUniqueLabel(detailBytes); }
+            catch (InvalidDataException error) { notes.Add(error.Message); }
+            exoticLimit.Visible = loadedLimit is not null;
+            exoticLimit.Text = loadedLimit == true ? "1" : "0";
+            limitTier = tier.Text;
             bucket.Text = detail.Item.Bucket.ToString(CultureInfo.InvariantCulture);
             for (int i = 0; i < detail.Stats.Count; i++)
                 statDrafts.Add(new() { Source = i, Index = detail.Stats[i].Index, Value = detail.Stats[i].Value });
             for (int i = 0; i < detail.Perks.Count; i++) perkDrafts.Add(new() { Source = i, Index = detail.Perks[i].Index });
+            if (weapon && !plugItem && InvestmentDamageType.Installed(investment))
+            {
+                if (detail.Sockets.Any(socket => socket.Type == InvestmentDamageType.DamageSocketType))
+                    notes.Add(damageWhy = "The damage type comes from the damage socket's plug, which has no other choices.");
+                else if (InvestmentDamageType.Read(investment, [.. detail.Perks.Select(perk => (int)perk.Index)]) is { } type)
+                { damageType.Visible = true; damageType.Text = type.ToString(CultureInfo.InvariantCulture); }
+                else notes.Add(damageWhy = "The perks do not fix one damage type.");
+            }
+            damageApplied = damageType.Text;
             if (source.DisplayTag == 0) detailError = "The item has no display record, so it has no name or icon to change.";
             else
             {
@@ -386,6 +457,9 @@ public sealed class ItemWorkflow : CreationWorkflow
         fireRate.Visible = damagePerShot.Visible = magazineSize.Visible = reticle.Visible = reticleTexture.Visible
             = hudIcon.Visible = authoredWeapon;
         weaponOnly.Visible = !authoredWeapon;
+        loadedAmmo = authoredWeapon ? InvestmentAmmoType.ReadDisplay(packages.Read(source!.DisplayTag)) : null;
+        ammoType.Visible = loadedAmmo is { } ammo && InvestmentAmmoType.Valid(ammo);
+        ammoType.Text = loadedAmmo?.ToString(CultureInfo.InvariantCulture) ?? "";
         try
         {
             byte[] types = packages.Read(InvestmentSocketTypes.GameplayTable);
@@ -435,6 +509,17 @@ public sealed class ItemWorkflow : CreationWorkflow
         loreTitle.Visible = loreSubtitle.Visible = loreText.Visible = loreIndex is not null;
     }
 
+    /** A plug clone copies its base; a project plug copies the installed plug its asset derives from. */
+    private InvestmentItem? SetBase(InvestmentCatalog investment)
+    {
+        var packages = workspace.Catalog!;
+        if (!plugItem || source is null || !packages.ContainsTag(sources.PlugSets)) return null;
+        if (editing is null) return source;
+        uint? baseTag = workspace.Project?.AddedAssets.FirstOrDefault(asset => asset.Native is { } native
+            && TagOf(native.PackageId, native.EntryIndex!.Value) == source.Tag)?.BaseTagHash;
+        return baseTag is { } tag && investment.FindItem(tag) is { } item && Installed(packages, item.Tag) ? item : null;
+    }
+
     /** Index tables and the string template are checked once per item and overlay, not per keystroke. */
     private void Preflight(StudioWorkspace workspace)
     {
@@ -475,8 +560,8 @@ public sealed class ItemWorkflow : CreationWorkflow
             && !(Installed(packages, source!.Tag) && Installed(packages, source.DisplayTag)))
             yield return "Choose an installed item to clone.";
         if (preflightProblem.Length != 0) yield return preflightProblem;
-        if ((StringsChanged || CustomIconChanged || PerkIconChanged || HudIconChanged || TuningChanged || ReticleChanged)
-            && PackageProblem(workspace, package) is { } problem) yield return problem;
+        if ((StringsChanged || CustomIconChanged || PerkIconChanged || HudIconChanged || TuningChanged || ReticleChanged
+                || AmmoChanged) && PackageProblem(workspace, package) is { } problem) yield return problem;
         if (CustomIconChanged && IconProblem("custom", customIcon, CustomIconProblem) is { } iconProblem) yield return iconProblem;
         if (PerkIconChanged && IconProblem("perk", perkIcon, PerkIconProblem) is { } perkIconProblem) yield return perkIconProblem;
         if (HudIconChanged && IconProblem("hud", hudIcon, HudIconProblem) is { } hudIconProblem) yield return hudIconProblem;
@@ -525,6 +610,10 @@ public sealed class ItemWorkflow : CreationWorkflow
     private bool PerkIconChanged => perkIcon.Visible && !perkIcon.IsEmpty;
     private bool HudIconChanged => hudIcon.Visible && !hudIcon.IsEmpty;
     private bool ReticleChanged => reticle.Visible && reticle.Text == "1";
+    private bool LimitChanged => exoticLimit.Visible && (exoticLimit.Text == "1") != loadedLimit;
+    private bool InSharedSets => sharedSets.Text == "1";
+    private bool SharedSetsChanged => sharedSets.Visible && InSharedSets != inSetsNow;
+    private bool AmmoChanged => ammoType.Visible && ammoType.TryParse(out ulong ammo) && (int)ammo != loadedAmmo;
     private bool TuningChanged => fireRate.Visible && !(fireRate.IsEmpty && damagePerShot.IsEmpty && magazineSize.IsEmpty)
         || FamilyChanged || ValuesChanged;
 
@@ -676,9 +765,10 @@ public sealed class ItemWorkflow : CreationWorkflow
             {
                 var types = group.Where(item => item.TypeName.Length != 0).GroupBy(item => item.TypeName)
                     .OrderByDescending(type => type.Count()).Select(type => type.Key).ToArray();
-                string label = types.Length == 0 ? $"Bucket {group.Key}" : $"{types[0]} (Bucket {group.Key})";
-                return new CreationChoice(group.Key, label, types.Length == 0 ? $"{group.Count()} items"
-                    : $"{group.Count()} items, such as {string.Join(", ", types.Take(3))}");
+                string label = investment.BucketName(group.Key) is { Length: > 0 } name ? name
+                    : types.Length == 0 ? $"Bucket {group.Key}" : $"{types[0]} (Bucket {group.Key})";
+                return new CreationChoice(group.Key, label, types.Length == 0 ? $"Bucket {group.Key}, {group.Count()} items"
+                    : $"Bucket {group.Key}, {group.Count()} items, such as {string.Join(", ", types.Take(3))}");
             }).ToArray();
         bucketChoices = (workspace.InvestmentRevision, workspace.AssetRevision, rows);
         return rows;
@@ -729,73 +819,29 @@ public sealed class ItemWorkflow : CreationWorkflow
             WeaponTranslationEdits.Precision, WeaponTranslationEdits.MagazineBase }
             .FirstOrDefault(known => known.Table == table && known.Column == column).Name ?? $"Table {table}, column {column + 1}";
 
-    /** Stat drafts: uncheck removes an installed row, unchecking a new row drops it, and Add appends one. */
-    private void DrawStats()
+    /** Every stat definition, built once per investment and name revision. */
+    private CreationChoice[] StatChoices(InvestmentCatalog investment)
     {
-        if (workspace.Investment is not { } investment || detail is null) { ImGui.TextDisabled("Choose a base item"); return; }
-        for (int i = 0; i < statDrafts.Count; i++)
-        {
-            var draft = statDrafts[i];
-            ImGui.PushID(i);
-            bool keep = !draft.Remove;
-            bool toggled = ImGui.Checkbox("##keep", ref keep);
-            StudioUi.Tip("Uncheck to remove");
-            if (toggled)
-            {
-                if (draft.Source < 0) { statDrafts.RemoveAt(i); ImGui.PopID(); break; }
-                draft.Remove = !keep;
-            }
-            ImGui.SameLine(); ImGui.SetNextItemWidth(120 * CreationWidgets.Scale);
-            ImGui.BeginDisabled(draft.Remove);
-            ImGui.InputInt("##value", ref draft.Value);
-            StudioUi.Tip("Zero uses the stat's level curve when one exists.");
-            ImGui.EndDisabled();
-            ImGui.SameLine();
-            ImGui.TextUnformatted(investment.StatName(draft.Index) + (draft.Source < 0 ? "  (new)" : ""));
-            if (draft.Source >= 0 && (detail.Stats[draft.Source].Conditional || detail.Stats[draft.Source].Computed))
-            { ImGui.SameLine(); ImGui.TextDisabled(detail.Stats[draft.Source].Computed ? "Computed" : "Conditional"); }
-            ImGui.PopID();
-        }
         if (statChoices.Investment != workspace.InvestmentRevision || statChoices.Names != workspace.NameRevision)
             statChoices = (workspace.InvestmentRevision, workspace.NameRevision,
                 investment.StatDefinitions.Select(stat => new CreationChoice(stat.Index, stat.Name)).ToArray());
-        var choices = statChoices.Rows;
-        if (choices.Length == 0) return;
-        if (choices.All(choice => choice.Value != newStat)) newStat = choices[0].Value;
-        CreationWidgets.Choice("##new-stat", ref newStat, choices, 200);
-        ImGui.SameLine(); ImGui.SetNextItemWidth(110 * CreationWidgets.Scale); ImGui.InputInt("##new-stat-value", ref newStatValue);
-        ImGui.SameLine();
-        if (StudioUi.IconButton("add-stat", StudioIcon.Plus, "Add stat"))
-            statDrafts.Add(new() { Index = (byte)newStat, Value = newStatValue });
+        return statChoices.Rows;
     }
 
-    /** Perk drafts, kept or removed like stat drafts; Add takes a perk from the search. */
-    private void DrawPerks()
+    /** Swaps the marker perk draft for the chosen damage type, keeping its family; a matching installed marker stays. */
+    private void ApplyDamageType(InvestmentCatalog investment)
     {
-        if (workspace.Investment is not { } investment || detail is null) { ImGui.TextDisabled("Choose a base item"); return; }
-        for (int i = 0; i < perkDrafts.Count; i++)
-        {
-            var draft = perkDrafts[i];
-            ImGui.PushID(i);
-            bool keep = !draft.Remove;
-            bool toggled = ImGui.Checkbox("##keep", ref keep);
-            StudioUi.Tip("Uncheck to remove");
-            if (toggled)
-            {
-                if (draft.Source < 0) { perkDrafts.RemoveAt(i); ImGui.PopID(); break; }
-                draft.Remove = !keep;
-            }
-            ImGui.SameLine();
-            ImGui.TextUnformatted(PerkLabel(investment, draft.Index) + (draft.Source < 0 ? "  (new)" : ""));
-            if (draft.Index < investment.PerkCount) StudioUi.Tip(investment.PerkDefinitions[draft.Index].Description);
-            ImGui.PopID();
-        }
-        string label = newPerkLabel;
-        CreationWidgets.Picker("new-perk", ref newPerk, ref label, search => SearchPerks(investment, search),
-            HashCode.Combine(workspace.InvestmentRevision, workspace.NameRevision), 100);
-        newPerkLabel = label;
-        if (StudioUi.IconButton("add-perk", StudioIcon.Plus, "Add perk", newPerk is not null) && newPerk is { } perk)
-            perkDrafts.Add(new() { Index = checked((ushort)perk) });
+        damageApplied = damageType.Text;
+        if (!damageType.TryParse(out ulong type)) return;
+        var markers = perkDrafts.Where(draft => InvestmentDamageType.Marker(investment, draft.Index) is not null).ToList();
+        int family = markers.Count == 0 ? InvestmentDamageType.LaterFamily
+            : InvestmentDamageType.Marker(investment, markers[0].Index)!.Value.Family;
+        int? wanted = type == InvestmentDamageType.Kinetic ? null
+            : InvestmentDamageType.MarkerIndex(investment, family, (int)type);
+        perkDrafts.RemoveAll(draft => draft.Source < 0 && markers.Contains(draft));
+        foreach (var draft in markers.Where(draft => draft.Source >= 0)) draft.Remove = draft.Index != wanted;
+        if (wanted is { } index && !perkDrafts.Any(draft => !draft.Remove && draft.Index == index))
+            perkDrafts.Add(new() { Index = checked((ushort)index) });
     }
 
     /** Labels and search text are built once per investment and name revision; a keystroke only filters them. */
@@ -817,23 +863,6 @@ public sealed class ItemWorkflow : CreationWorkflow
     private string PerkLabel(InvestmentCatalog investment, int index) =>
         index < investment.PerkCount && investment.PerkDefinitions[index].Name.Length != 0 ? investment.PerkDefinitions[index].Name
             : workspace.Names?.PerkName((uint)index) ?? investment.PerkName(index);
-
-    /** One plug choice per socket: its embedded plugs, then project copies of them. */
-    private void DrawSockets()
-    {
-        if (workspace.Investment is not { } investment || detail is null) { ImGui.TextDisabled("Choose a base item"); return; }
-        if (detail.Sockets.Count == 0) { ImGui.TextDisabled("The item has no sockets"); return; }
-        foreach (var socket in detail.Sockets)
-        {
-            ImGui.PushID(socket.Index);
-            ImGui.TextDisabled($"Socket {socket.Index + 1}  /  Type {socket.Type}");
-            ImGui.SameLine();
-            uint value = plugDrafts.TryGetValue(socket.Index, out ushort chosen) ? chosen : socket.InitialPlug;
-            if (CreationWidgets.Choice("##plug", ref value, SocketChoices(investment, socket), 300))
-                SetSocketPlug(socket.Index, checked((ushort)value));
-            ImGui.PopID();
-        }
-    }
 
     /** Built once per socket; cleared with the project plugs and on a name change. */
     private CreationChoice[] SocketChoices(InvestmentCatalog investment, InvestmentSocket socket)
@@ -914,11 +943,17 @@ public sealed class ItemWorkflow : CreationWorkflow
             throw new InvalidDataException("The item's definition or display record is missing.");
         bool clone = editing is null;
         string itemName = name.Text.Trim(), itemDescription = description.Text.Trim();
-        bool allocates = StringsChanged || clone || CustomIconChanged || PerkIconChanged || HudIconChanged || TuningChanged || ReticleChanged;
+        bool allocates = StringsChanged || clone || CustomIconChanged || PerkIconChanged || HudIconChanged || TuningChanged
+            || ReticleChanged || AmmoChanged;
         ushort packageId = allocates ? PackageId(package) : (ushort)0;
         int next = allocates ? NextEntryIndex(project, packageId) : 0;
 
         byte[] definition = EditDefinition(investment, source.Tag, detailBytes);
+        // A choice a socket's randomized pool lacks joins a pool of the item's own.
+        byte[]? pools = null;
+        if (socketLists.Count + plugDrafts.Count != 0 && packages.ContainsTag(sources.PlugSets))
+            (definition, pools) = InvestmentPlugSets.FollowPools(definition, packages.ReadOriginal(sources.PlugSets),
+                packages.Read(sources.PlugSets), socketLists.Keys.Concat(plugDrafts.Keys));
         if (TypeChanged)
             definition = InvestmentWeaponType.SetType(definition, weaponType.Text.Trim(),
                 packages.Read(InvestmentWeaponType.TraitTableTag), packages.Read(InvestmentWeaponType.TraitCategoryTableTag)).Definition;
@@ -962,6 +997,7 @@ public sealed class ItemWorkflow : CreationWorkflow
         }
         if (FrameChanged) EditFrame(packages, project, investment, stringBank, edits);
 
+        int itemIndex = source.Index;
         if (clone)
         {
             if (CollectionNode is { } node)
@@ -975,11 +1011,38 @@ public sealed class ItemWorkflow : CreationWorkflow
             foreach (var (tag, bytes) in plan.Edits) edits[tag] = bytes;
             additions.InsertRange(0, plan.Additions);
             expected.InsertRange(0, [plan.DefinitionTag, plan.DisplayTag]);
+            itemIndex = plan.ItemIndex;
         }
         else
         {
             edits[source.Tag] = definition;
             edits[source.DisplayTag] = display;
+        }
+
+        if (pools is not null) edits[sources.PlugSets] = pools;
+        if (SharedSetsChanged)
+        {
+            var basePlug = setBase ?? throw new InvalidOperationException("Choose the plug again.");
+            var (table, joined) = InvestmentPlugSets.Rebuild(packages.ReadOriginal(sources.PlugSets),
+                pools ?? packages.Read(sources.PlugSets), itemIndex, basePlug.Index, InSharedSets,
+                InvestmentPlugSets.RolledSets(packages, investment));
+            if (InSharedSets && joined.Count == 0)
+                throw new InvalidDataException($"{basePlug.Name} is in no plug set a copy can join.");
+            edits[sources.PlugSets] = table;
+        }
+
+        var addedEdits = new Dictionary<string, byte[]>();
+        // Each asset plan takes the next free entry after the ones earlier plans took.
+        int NextEntry() => additions.Where(asset => asset.Native?.PackageId == packageId)
+            .Select(asset => asset.Native!.EntryIndex!.Value + 1).DefaultIfEmpty(next).Max();
+        // A plan's assets join the build and the tags it must allocate; its rewrites join the edits.
+        void Take(IReadOnlyList<ProjectAssetAddition> assets, IReadOnlyDictionary<uint, byte[]>? changes = null,
+            IReadOnlyDictionary<string, byte[]>? added = null)
+        {
+            additions.AddRange(assets);
+            expected.AddRange(assets.Select(asset => TagOf(asset.Native!.PackageId, asset.Native.EntryIndex!.Value)));
+            foreach (var (tag, bytes) in changes ?? new Dictionary<uint, byte[]>()) edits[tag] = bytes;
+            foreach (var (id, bytes) in added ?? new Dictionary<string, byte[]>()) addedEdits[id] = bytes;
         }
 
         string? iconPath = null;
@@ -990,14 +1053,10 @@ public sealed class ItemWorkflow : CreationWorkflow
             iconPath = Path.GetFullPath(customIcon.Text.Trim());
             byte[] png = File.ReadAllBytes(iconPath);
             iconHash = SHA256.HashData(png);
-            int iconEntry = additions.Where(asset => asset.Native?.PackageId == packageId)
-                .Select(asset => asset.Native!.EntryIndex!.Value + 1).DefaultIfEmpty(next).Max();
             var plan = ItemIconAuthoring.Prepare(project, packages, source, PngInterchange.Read(png),
-                FileName(itemName), packageId, iconEntry, display,
+                FileName(itemName), packageId, NextEntry(), display,
                 templateProfile: plugItem ? ItemIconAuthoring.ReadPerkProfile(packages) : null);
-            additions.AddRange(plan.Assets);
-            expected.AddRange(plan.Assets.Select(asset => TagOf(asset.Native!.PackageId, asset.Native.EntryIndex!.Value)));
-            foreach (var (tag, bytes) in plan.Changes) edits[tag] = bytes;
+            Take(plan.Assets, plan.Changes);
         }
 
         string? perkIconPath = null;
@@ -1010,14 +1069,10 @@ public sealed class ItemWorkflow : CreationWorkflow
             perkIconPath = Path.GetFullPath(perkIcon.Text.Trim());
             byte[] png = File.ReadAllBytes(perkIconPath);
             perkIconHash = SHA256.HashData(png);
-            int iconEntry = additions.Where(asset => asset.Native?.PackageId == packageId)
-                .Select(asset => asset.Native!.EntryIndex!.Value + 1).DefaultIfEmpty(next).Max();
             var plan = SandboxPerkIconAuthoring.Prepare(project, packages, current.Perks[0].Index,
-                source, PngInterchange.Read(png), FileName(current.Perks[0].Name), packageId, iconEntry,
+                source, PngInterchange.Read(png), FileName(current.Perks[0].Name), packageId, NextEntry(),
                 additions, edits, ItemIconAuthoring.ReadPerkProfile(packages));
-            additions.AddRange(plan.Assets);
-            expected.AddRange(plan.Assets.Select(asset => TagOf(asset.Native!.PackageId, asset.Native.EntryIndex!.Value)));
-            foreach (var (tag, bytes) in plan.Changes) edits[tag] = bytes;
+            Take(plan.Assets, plan.Changes);
         }
 
         // Collections shows the item's own flavor; after the icon plans, which rewrite this table.
@@ -1030,7 +1085,6 @@ public sealed class ItemWorkflow : CreationWorkflow
                 source.Index, InvestmentCollections.DisplayFlavor, flavorBank, flavorHash);
         }
 
-        var addedEdits = new Dictionary<string, byte[]>();
         string? hudIconPath = null;
         byte[]? hudIconHash = null;
         if (HudIconChanged)
@@ -1040,39 +1094,33 @@ public sealed class ItemWorkflow : CreationWorkflow
             byte[] png = File.ReadAllBytes(hudIconPath);
             hudIconHash = SHA256.HashData(png);
             uint root = WeaponArchetypeAuthoring.Read(packages, definition).EntityTag;
-            int iconEntry = additions.Where(asset => asset.Native?.PackageId == packageId)
-                .Select(asset => asset.Native!.EntryIndex!.Value + 1).DefaultIfEmpty(next).Max();
             var plan = WeaponHudIconAuthoring.Prepare(project, packages, root, PngInterchange.Read(png),
-                FileName(itemName), packageId, iconEntry);
-            additions.AddRange(plan.Assets);
-            expected.AddRange(plan.Assets.Select(asset => TagOf(asset.Native!.PackageId, asset.Native.EntryIndex!.Value)));
-            foreach (var (tag, bytes) in plan.Changes) edits[tag] = bytes;
-            foreach (var (id, bytes) in plan.AddedChanges) addedEdits[id] = bytes;
+                FileName(itemName), packageId, NextEntry());
+            Take(plan.Assets, plan.Changes, plan.AddedChanges);
         }
 
         if (TuningChanged)
         {
             if (clone) throw new InvalidDataException("Create the weapon before tuning it.");
-            int tuningEntry = additions.Where(asset => asset.Native?.PackageId == packageId)
-                .Select(asset => asset.Native!.EntryIndex!.Value + 1).DefaultIfEmpty(next).Max();
-            var plan = WeaponTuningAuthoring.Prepare(project, packages, investment, source, Tuning(), packageId, tuningEntry,
+            var plan = WeaponTuningAuthoring.Prepare(project, packages, investment, source, Tuning(), packageId, NextEntry(),
                 additions, edits);
-            additions.AddRange(plan.Assets);
-            expected.AddRange(plan.Assets.Select(asset => TagOf(asset.Native!.PackageId, asset.Native.EntryIndex!.Value)));
-            foreach (var (tag, bytes) in plan.Changes) edits[tag] = bytes;
-            foreach (var (id, bytes) in plan.AddedChanges) addedEdits[id] = bytes;
+            Take(plan.Assets, plan.Changes, plan.AddedChanges);
+        }
+
+        if (AmmoChanged)
+        {
+            if (clone) throw new InvalidDataException("Create the weapon before changing its ammo type.");
+            var plan = WeaponTuningAuthoring.PrepareAmmo(project, packages, source,
+                int.Parse(ammoType.Text.Trim(), CultureInfo.InvariantCulture), packageId, NextEntry(), additions, edits);
+            Take(plan.Assets, plan.Changes, plan.AddedChanges);
         }
 
         if (ReticleChanged)
         {
             if (clone) throw new InvalidDataException("Create the weapon before adding a reticle.");
-            int reticleEntry = additions.Where(asset => asset.Native?.PackageId == packageId)
-                .Select(asset => asset.Native!.EntryIndex!.Value + 1).DefaultIfEmpty(next).Max();
             var image = reticleTexture.IsEmpty ? null : PngInterchange.Read(reticleTexture.Text.Trim());
-            var plan = WeaponReticleAuthoring.Prepare(project, packages, source.Tag, image, packageId, reticleEntry, additions);
-            additions.AddRange(plan.Assets);
-            expected.AddRange(plan.Assets.Select(asset => TagOf(asset.Native!.PackageId, asset.Native.EntryIndex!.Value)));
-            foreach (var (id, bytes) in plan.AddedChanges) addedEdits[id] = bytes;
+            var plan = WeaponReticleAuthoring.Prepare(project, packages, source.Tag, image, packageId, NextEntry(), additions);
+            Take(plan.Assets, added: plan.AddedChanges);
         }
 
         // The item art row lists the perks whose text and icons the UI loads; a clone plan already set it.
@@ -1177,6 +1225,11 @@ public sealed class ItemWorkflow : CreationWorkflow
             bytes = investment.Edit(tag, bytes, current.Fields.Single(field => field.Offset == 184), slot.ToString(CultureInfo.InvariantCulture));
             current = investment.ReadItem(tag, bytes);
         }
+        if (LimitChanged)
+        {
+            bytes = InvestmentEquippingBlock.SetExoticUniqueLabel(bytes, exoticLimit.Text == "1");
+            current = investment.ReadItem(tag, bytes);
+        }
         foreach (var draft in statDrafts.Where(draft => draft.Source >= 0 && !draft.Remove))
         {
             var stat = current.Stats[draft.Source];
@@ -1184,8 +1237,23 @@ public sealed class ItemWorkflow : CreationWorkflow
             bytes = investment.Edit(tag, bytes, stat.Field, draft.Value.ToString(CultureInfo.InvariantCulture));
             current = investment.ReadItem(tag, bytes);
         }
+        // An edited choice list rewrites its socket, its default among the choices; project copies keep their
+        // template's condition.
+        byte[] beforeSockets = bytes;
+        foreach (var (socket, plugs) in socketLists)
+        {
+            var row = current.Sockets[socket];
+            ushort? Template(InvestmentSocketChoice choice) =>
+                ProjectSocketPlugs(investment, detail!.Sockets[choice.FromSocket ?? socket])
+                    .Where(copy => copy.Plug == choice.Plug).Select(copy => (ushort?)copy.Template).FirstOrDefault();
+            ushort initial = plugDrafts.TryGetValue(socket, out ushort chosen) ? chosen : row.InitialPlug;
+            bytes = investment.SetSocketPlugs(tag, bytes, row, [.. plugs.Select(plug => plug with { Template = Template(plug) })], initial,
+                beforeSockets);
+            current = investment.ReadItem(tag, bytes);
+        }
         foreach (var (socket, plug) in plugDrafts)
         {
+            if (socketLists.ContainsKey(socket)) continue;
             var row = current.Sockets[socket];
             if (row.InitialPlug == plug) continue;
             if (!row.AllowedPlugs.Contains(plug))

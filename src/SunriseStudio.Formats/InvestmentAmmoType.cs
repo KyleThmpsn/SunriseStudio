@@ -33,4 +33,12 @@ public static class InvestmentAmmoType
         }
         catch (Exception error) when (error is InvalidDataException or KeyNotFoundException or OverflowException) { return null; }
     }
+
+    public static byte[] SetDisplay(ReadOnlySpan<byte> display, int ammo)
+    {
+        if (ReadDisplay(display) is null) throw new InvalidDataException("The weapon display has no ammo classification.");
+        byte[] output = display.ToArray();
+        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(TypeField), checked((ushort)ammo));
+        return output;
+    }
 }

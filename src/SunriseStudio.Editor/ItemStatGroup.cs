@@ -72,6 +72,21 @@ public sealed record ItemStatGroup(int Maximum, IReadOnlyDictionary<byte, (int P
     public static int Sum(IReadOnlyList<StatSource>? sources, bool changes) =>
         sources?.Where(source => source.Change == changes && !source.Conditional).Sum(source => source.Value) ?? 0;
 
+    /**
+     * What a stat reading is made of: the item's own raw value, each plug's share, then the value the game shows when a
+     * curve changes the total, and a note on that value. Empty when the reading is the item's own value as it is.
+     */
+    public static string Breakdown(int own, IReadOnlyList<StatSource>? sources, int raw, int shown, string note = "")
+    {
+        var lines = new List<string>();
+        if (own != 0 || sources is not { Count: > 0 }) lines.Add($"Base {own}");
+        foreach (var source in sources ?? [])
+            lines.Add($"{source.Plug} {source.Value:+0;-0}" + (source.Conditional ? " while its condition holds" : ""));
+        if (shown != raw) lines.Add($"Shows {shown}");
+        if (note.Length != 0) lines.Add(note);
+        return lines.Count > 1 || sources?.Any(source => source.Conditional) == true ? string.Join("\n", lines) : "";
+    }
+
     /** The stat's place in the group; stats the game does not show have none. */
     public int Position(byte stat) => Stats.TryGetValue(stat, out var row) ? row.Position : int.MaxValue;
 

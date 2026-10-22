@@ -8,6 +8,8 @@ public static class InvestmentDamageType
     /** Choice values: Kinetic, then the three elements in marker order. */
     public static readonly string[] Names = ["Kinetic", "Arc", "Solar", "Void"];
     public const int Kinetic = 0;
+    /** A weapon with no marker takes the later family's. */
+    public const int LaterFamily = 1;
     // Marker perk hashes for Arc, Solar and Void: the family launch weapons carry, then the later one.
     private static readonly uint[][] Markers = [[0xB0C2E8FA, 0x30D3A473, 0x4F978D3C], [0xCCC507A5, 0xCFCF0160, 0x10A9B235]];
 
@@ -27,6 +29,10 @@ public static class InvestmentDamageType
         }
         return null;
     }
+
+    /** The perk index of one family's marker for an element. */
+    public static int MarkerIndex(InvestmentCatalog investment, int family, int type) =>
+        investment.PerkDefinitions.First(perk => perk.Hash == Markers[family][type - 1]).Index;
 
     // A weapon with a socket of this type takes its damage type from the socket's plug.
     public const ushort DamageSocketType = 68;
