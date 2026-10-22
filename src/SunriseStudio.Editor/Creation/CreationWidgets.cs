@@ -2,7 +2,6 @@ using System.Numerics;
 using ImGuiNET;
 using SunriseStudio.Authoring;
 using SunriseStudio.Packages;
-using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor.Creation;
 
@@ -120,15 +119,19 @@ public static class CreationWidgets
      * @param icon The icon a drawn row shows before its name, or null while it reads.
      * @param facets Dropdown filters beside the type and rarity ones the rows give; a facet with no choices hides.
      * @param reveal Scrolls the list to the chosen row once it is drawn.
+     * @param detail The line under an icon row's name, in place of its type; called only for drawn rows.
      * @return True when the user chose a row.
      */
     public static unsafe bool RowPicker(string id, ref uint? value, ref string label, IReadOnlyList<BrowserAsset> rows,
         Func<BrowserAsset, bool>? filter, int revision, Func<uint, bool> isProject, float height = 130, bool clearable = true,
-        Func<uint, ItemIcon?>? icon = null, IReadOnlyList<RowFacet>? facets = null, bool reveal = false)
+        Func<uint, ItemIcon?>? icon = null, IReadOnlyList<RowFacet>? facets = null, bool reveal = false,
+        Func<BrowserAsset, string>? detail = null)
     {
         uint key = ImGui.GetID(id);
         if (!RowPickers.TryGetValue(key, out var state)) RowPickers.Add(key, state = new());
         state.Reveal |= reveal;
+        // A picker window opens with its filters at their defaults.
+        if (reveal) state.Chosen.Clear();
         uint? revealed = value;
         bool changed = false;
         ImGui.PushID(id);
@@ -171,10 +174,10 @@ public static class CreationWidgets
                 var row = state.Results[i];
                 uint tag = row.Entry.TagHash;
                 // The tag tells rows with the same name apart.
-                string name = row.Name, detail = isProject(tag) ? "Project" : $"{tag:X8}";
+                string name = row.Name, source = isProject(tag) ? "Project" : $"{tag:X8}";
                 ImGui.PushID(i);
                 var start = ImGui.GetCursorScreenPos();
-                float width = ImGui.GetContentRegionAvail().X, detailWidth = ImGui.CalcTextSize(detail).X;
+                float width = ImGui.GetContentRegionAvail().X, sourceWidth = ImGui.CalcTextSize(source).X;
                 if (ImGui.Selectable("##row", value == tag, ImGuiSelectableFlags.None, new(0, rowHeight)))
                 { value = tag; label = name; changed = true; }
                 if (ImGui.IsItemHovered()) AssetTooltip.Draw(row);
@@ -189,14 +192,14 @@ public static class CreationWidgets
                     icon(tag)?.Draw(draw, start, start + new Vector2(rowHeight));
                     indent = rowHeight + 6 * Scale; top = (rowHeight - line * 2) / 2;
                 }
-                draw.PushClipRect(start, start + new Vector2(width - detailWidth - 8 * Scale, rowHeight), true);
+                draw.PushClipRect(start, start + new Vector2(width - sourceWidth - 8 * Scale, rowHeight), true);
                 draw.AddText(start + new Vector2(indent, top), color, name);
                 if (icon is not null)
                     draw.AddText(start + new Vector2(indent, top + line), ImGui.GetColorU32(StudioTheme.Muted),
-                        row.Type.Length != 0 ? row.Type : row.Kind);
+                        detail?.Invoke(row) ?? (row.Type.Length != 0 ? row.Type : row.Kind));
                 draw.PopClipRect();
-                draw.AddText(new(start.X + width - detailWidth, start.Y + (rowHeight - line) / 2),
-                    ImGui.GetColorU32(ImGuiCol.TextDisabled), detail);
+                draw.AddText(new(start.X + width - sourceWidth, start.Y + (rowHeight - line) / 2),
+                    ImGui.GetColorU32(ImGuiCol.TextDisabled), source);
                 ImGui.PopID();
             }
         clipper.End(); clipper.Destroy();
@@ -261,11 +264,12 @@ public static class CreationWidgets
             string current = facet.Choices.FirstOrDefault(choice => choice.Value == chosen)?.Label ?? "Any";
             ImGui.SetNextItemWidth(width);
             if (!ImGui.BeginCombo("##" + facet.Name, $"{facet.Name}: {current}")) continue;
-            if (ImGui.Selectable("Any", chosen == AnyValue)) state.Chosen[facet.Name] = AnyValue;
+            if (!facet.Widening && ImGui.Selectable("Any", chosen == AnyValue)) state.Chosen[facet.Name] = AnyValue;
             foreach (var choice in facet.Choices)
             {
                 ImGui.PushID(unchecked((int)choice.Value));
                 if (ImGui.Selectable(choice.Label, choice.Value == chosen)) state.Chosen[facet.Name] = choice.Value;
+                StudioUi.Tip(choice.Detail);
                 ImGui.PopID();
             }
             ImGui.EndCombo();
@@ -281,7 +285,8 @@ public static class CreationWidgets
             .Where(pair => pair.Value != AnyValue).ToArray();
         if (active.Length == 0) return (filter, revision);
         int key = active.Aggregate(revision, (hash, pair) => HashCode.Combine(hash, pair.Facet.Name, pair.Value));
-        return (row => (filter?.Invoke(row) ?? true) && active.All(pair => pair.Facet.Value(row) == pair.Value), key);
+        return (row => (filter?.Invoke(row) ?? true) && active.All(pair => pair.Facet.Widening
+            ? pair.Facet.Value(row) is { } at && at <= pair.Value : pair.Facet.Value(row) == pair.Value), key);
     }
 
     /**
@@ -291,7 +296,7 @@ public static class CreationWidgets
      */
     public static bool RowPickerWindow(string id, ref uint? value, ref string label, IReadOnlyList<BrowserAsset> rows,
         Func<BrowserAsset, bool>? filter, int revision, Func<uint, bool> isProject, Func<uint, ItemIcon?>? icon = null,
-        IReadOnlyList<RowFacet>? facets = null)
+        IReadOnlyList<RowFacet>? facets = null, Func<BrowserAsset, string>? detail = null)
     {
         ImGui.SetNextWindowSize(new Vector2(760, 640) * Scale, ImGuiCond.Appearing);
         bool open = true;
@@ -304,7 +309,7 @@ public static class CreationWidgets
         float list = ImGui.GetContentRegionAvail().Y - footer - ImGui.GetTextLineHeightWithSpacing()
             - ImGui.GetFrameHeightWithSpacing() * 2;
         RowPicker("rows", ref draft, ref draftLabel, rows, filter, revision, isProject, Math.Max(120 * Scale, list) / Scale,
-            clearable: false, icon: icon, facets: facets, reveal: ImGui.IsWindowAppearing());
+            clearable: false, icon: icon, facets: facets, reveal: ImGui.IsWindowAppearing(), detail: detail);
         WindowDrafts[key] = (draft, draftLabel);
         bool chosen = false;
         float button = 110 * Scale;
@@ -369,7 +374,8 @@ public static class CreationWidgets
             if (i > 0) ImGui.SameLine(0, gap);
             bool selected = choices[i].Value == value;
             if (selected) ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetStyle().Colors[(int)ImGuiCol.Header]);
-            if (ImGui.Button(choices[i].Label + "##" + i, new(each, 0)) && !selected) { value = choices[i].Value; changed = true; }
+            if (ImGui.Button(choices[i].Label + "##" + i, new(each, 0)) && !selected)
+            { value = choices[i].Value; changed = true; }
             if (selected) ImGui.PopStyleColor();
             StudioUi.Tip(choices[i].Detail);
         }

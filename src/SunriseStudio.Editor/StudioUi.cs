@@ -137,7 +137,7 @@ public static partial class StudioUi
     }
 
     /** The text, or its longest prefix that fits with "..." added. */
-    private static string Fit(string text, float width)
+    internal static string Fit(string text, float width)
     {
         if (width <= 0 || ImGui.CalcTextSize(text).X <= width) return text;
         int low = 0, high = text.Length;
@@ -172,6 +172,12 @@ public static partial class StudioUi
             ImGui.GetColorU32(ImGuiCol.Text));
     }
 
+    /** The badge a conditional stat or perk row carries, and what it explains. */
+    public const string ConditionalBadge = "Conditional", ConditionalTip = "Active only while its condition holds.";
+
+    /** The width Badge takes for this text. */
+    public static float BadgeWidth(string text) => ImGui.CalcTextSize(text).X * .8f + 10 * CreationWidgets.Scale;
+
     /** A few words in a faint box with a hairline border and slight corners. */
     public static void Badge(string text, string tip = "")
     {
@@ -201,12 +207,15 @@ public static partial class StudioUi
         return clicked;
     }
 
-    /** A warning glyph on the text line, in a severity colour. */
-    public static void WarningIcon(Vector4 color)
+    /**
+     * A warning glyph on the text line, in a severity colour.
+     * @param framed Centres it on a line of buttons, where AlignTextToFramePadding lowers the text beside it.
+     */
+    public static void WarningIcon(Vector4 color, bool framed = false)
     {
-        float line = ImGui.GetTextLineHeight();
-        var at = ImGui.GetCursorScreenPos();
-        ImGui.Dummy(new(line, line));
+        float line = ImGui.GetTextLineHeight(), height = framed ? ImGui.GetFrameHeight() : line;
+        var at = ImGui.GetCursorScreenPos() + new Vector2(0, (height - line) / 2);
+        ImGui.Dummy(new(line, height));
         ImGuiIcons.Draw(ImGui.GetWindowDrawList(), StudioIcon.Warning, at + new Vector2(line * .1f), line * .8f,
             ImGui.GetColorU32(color));
     }

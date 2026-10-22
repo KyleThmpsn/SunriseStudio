@@ -262,7 +262,7 @@ public sealed partial class ScenePage
     {
         if (!ReferenceEquals(channelScene, scene)) { channelEdits.Clear(); channelScene = scene; }
         ImGui.BeginDisabled(context.Workspace.IsBusy);
-        if (!ImGui.TreeNodeEx($"Channels ({scene.ObjectChannels.Count})###channels", StudioUi.Section))
+        if (!ImGui.CollapsingHeader($"Channels ({scene.ObjectChannels.Count})###channels"))
         {
             StudioUi.Tip(ChannelHelp);
             ImGui.EndDisabled();
@@ -328,9 +328,7 @@ public sealed class PropertiesPage : IStudioPage
     private HashSet<AssetNode>? matching;
     private string matchedFilter = "";
     private AssetInspection? matchedInspection;
-    // Expand All and Collapse All give the tree new ids, so every node starts as the button set it.
-    private bool? allOpen;
-    private int generation;
+    private readonly TreeExpansion expansion = new();
     public string Id => "sunrise.properties";
     public string Title => "Properties";
     public bool CanOpen(StudioDocument document) => true;
@@ -339,23 +337,19 @@ public sealed class PropertiesPage : IStudioPage
     public void Draw(StudioPageContext context)
     {
         if (context.Workspace.Document is not { } document) return;
-        ImGui.SetNextItemWidth(-(ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.X));
+        ImGui.SetNextItemWidth(-TreeExpansion.Width);
         ImGui.InputTextWithHint("##propertySearch", "Find property", ref filter, 256);
         ImGui.SameLine();
-        bool expand = allOpen != true;
-        if (StudioUi.IconButton("open-all", expand ? StudioIcon.ExpandAll : StudioIcon.CollapseAll,
-            expand ? "Expand All" : "Collapse All"))
-        { allOpen = expand; generation++; }
+        expansion.Button();
         if (filter != matchedFilter || !ReferenceEquals(document.Inspection, matchedInspection))
         {
             matchedFilter = filter; matchedInspection = document.Inspection;
             matching = filter.Length == 0 ? null : Match(document.Inspection.Sections);
         }
         ImGui.BeginChild("property-tree");
-        ImGui.PushID(generation);
+        expansion.Begin();
         var notes = document.Inspection.Diagnostics;
-        if (notes.Count > 0 && ImGui.TreeNodeEx($"Notes ({notes.Count})###notes",
-            allOpen == true ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
+        if (notes.Count > 0 && ImGui.TreeNodeEx($"Notes ({notes.Count})###notes", expansion.Flags()))
         {
             StudioUi.Facts("inspection-notes", notes);
             ImGui.TreePop();
@@ -367,7 +361,7 @@ public sealed class PropertiesPage : IStudioPage
             DrawNode(document.Inspection.Sections[i], context, 0);
             ImGui.PopID();
         }
-        ImGui.PopID();
+        expansion.End();
         ImGui.EndChild();
     }
 
@@ -394,8 +388,7 @@ public sealed class PropertiesPage : IStudioPage
     private void DrawNode(AssetNode node, StudioPageContext context, int depth)
     {
         if (matching is not null && !matching.Contains(node)) return;
-        var flags = allOpen ?? depth == 0 ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
-        if (!ImGui.TreeNodeEx(node.Name, flags)) return;
+        if (!ImGui.TreeNodeEx(node.Name, expansion.Flags(openByDefault: depth == 0))) return;
         if (node.Properties.Count > 0 && ImGui.BeginTable("properties", 2,
             ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
         {

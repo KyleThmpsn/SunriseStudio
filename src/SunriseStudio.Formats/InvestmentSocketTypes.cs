@@ -21,8 +21,8 @@ public static class InvestmentSocketTypes
     // Gameplay row +35 is set on masterwork socket types: the stock sockets that use one start with Masterwork Upgrade,
     // Masterwork or a tier plug, and no other socket has it.
     private const int MasterworkField = 35;
-    // The game's weapon mods and armor mods socket categories, which also hold the masterwork sockets.
-    public static readonly IReadOnlySet<uint> ModCategories = new HashSet<uint> { 0xA0102655, 0x232C3572 };
+    // The game's armor perks socket category, which holds an armor piece's stat roll and its traits.
+    public const uint ArmorPerksCategory = 0x961B10E4;
 
     public static int Count(ReadOnlyMemory<byte> gameplay) => new TagReader(gameplay).Array(RowsField, stride: GameplayStride).Count;
 

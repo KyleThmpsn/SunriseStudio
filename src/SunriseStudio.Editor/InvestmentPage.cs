@@ -2,7 +2,6 @@ using System.Globalization;
 using ImGuiNET;
 using SunriseStudio.Formats;
 using SunriseStudio.Rendering;
-using SunriseStudio.Viewport;
 using ItemKinds = SunriseStudio.Packages.InvestmentItemKinds;
 
 namespace SunriseStudio.Editor;
@@ -87,7 +86,7 @@ public sealed partial class InvestmentPage : IPreparedStudioPage
         else if (workspace.InvestmentDetailCurrent && workspace.SelectedInvestmentItem is { } item) DrawItem(context, catalog, item);
         else if (workspace.InvestmentDetailCurrent && workspace.SelectedInvestmentVendor is { } vendor) DrawVendor(context, catalog, vendor);
         else if (workspace.Document is { } document && catalog.FindItem(document.Entry.TagHash) is { } linked)
-        { ImGui.TextUnformatted(linked.Name); if (ImGui.Button("Open item definition")) workspace.Select(linked.Tag); }
+            DrawDisplay(workspace, linked, document.Bytes);
         else if (workspace.Document is { } shown && catalog.FindVendor(shown.Entry.TagHash) is { } seller)
         { ImGui.TextUnformatted(seller.Name); if (ImGui.Button("Open vendor")) workspace.Select(seller.Tag); }
         else ImGui.TextDisabled("Not an item or vendor");
@@ -159,7 +158,12 @@ public sealed partial class InvestmentPage : IPreparedStudioPage
             ImGui.TextUnformatted(field.Name);
             var detail = context.Workspace.SelectedInvestmentItem;
             var stat = detail?.Stats.FirstOrDefault(row => row.Field.Offset == field.Offset);
-            var curve = stat is not null && detail is not null ? DisplayCurve(detail, stat) : null;
+            // The stat rows' reading of this item: its translated Magazine and what its plugs add.
+            var rows = ReferenceEquals(statGroup.Detail, detail) ? statGroup : default;
+            var curve = stat is not null && detail is not null ? DisplayCurve(detail, stat, rows.Magazine) : null;
+            bool magazine = stat?.Index == WeaponTranslationEdits.MagazineStat;
+            int plugs = stat is null ? 0 : ItemStatGroup.Sum(rows.Plugs?.GetValueOrDefault(stat.Index), false)
+                + ItemStatGroup.Sum(rows.Plugs?.GetValueOrDefault(stat.Index), true);
             if (stat is not null) ImGui.TextDisabled("Base value");
             if (plugChoices is { Count: > 0 })
             {
@@ -181,7 +185,8 @@ public sealed partial class InvestmentPage : IPreparedStudioPage
             }
             else { ImGui.SetNextItemWidth(350); ImGui.InputText("##investmentValue", ref editValue, 64); }
             if (curve is not null && int.TryParse(editValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int previewValue))
-                ImGui.TextDisabled(previewValue == 0 ? "Uses item-level context" : $"Display {curve.Evaluate(previewValue)}");
+                ImGui.TextDisabled(previewValue == 0 && !magazine ? "Uses item-level context"
+                    : $"Display {curve.Evaluate(previewValue + plugs)}");
             ImGui.BeginDisabled(!context.Workspace.CanEdit);
             if (ImGui.Button("Save delta") && SaveEditDraft(context.Workspace)) ImGui.CloseCurrentPopup();
             ImGui.EndDisabled(); ImGui.SameLine();
@@ -212,6 +217,8 @@ public sealed partial class InvestmentPage : IPreparedStudioPage
         if (errors.Count == 0 || !ImGui.CollapsingHeader($"{title} ({errors.Count})###{title}")) return;
         StudioUi.Facts(title, errors);
     }
-    private static InvestmentStatCurve? DisplayCurve(InvestmentItemDetail detail, InvestmentStat stat) =>
-        stat.Value != 0 && !stat.Computed && !stat.Conditional ? detail.DisplayCurves.GetValueOrDefault(stat.Index) : null;
+    /** Computed and conditional rows show raw; a zero row keeps its level curve, but a weapon's Magazine reads at every value. */
+    private static InvestmentStatCurve? DisplayCurve(InvestmentItemDetail detail, InvestmentStat stat, ItemMagazine? magazine) =>
+        (stat.Value != 0 || stat.Index == WeaponTranslationEdits.MagazineStat) && !stat.Computed && !stat.Conditional
+            ? ItemStatGroup.Curve(detail, stat.Index, magazine) : null;
 }

@@ -16,10 +16,10 @@ public sealed class NativeStudioEnvironment : IDisposable
 {
     public const string Policy = "Asset previews reflect a viewer studio: brighter above than below, a softbox toward"
         + " the key light and soft clouds, blurred to a flat level by roughness. It is viewer lighting, not a game environment.";
-    // Mip 8 and above hold the flat level, which the apply pass reads as diffuse. It is under the map viewer's 0.18:
-    // a dark inspect room reflects little, and a brighter studio tinted iridescent navy toward gold.
-    public const float FlatRadiance = .054f;
-    // The studio below is authored around a flat level of 0.32; Scale maps it to FlatRadiance.
+    // The flat level the roughest mips hold and the apply pass reads as diffuse. It sits under the map viewer's 0.18, as
+    // a dark inspect room reflects little.
+    private const float FlatRadiance = .054f;
+    // The shader's studio is authored around a flat level of 0.32, scaled to FlatRadiance.
     private const float AuthoredFlat = .32f;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -29,7 +29,6 @@ public sealed class NativeStudioEnvironment : IDisposable
     }
 
     private readonly Dx11Renderer renderer;
-    private readonly ID3D11Texture2D texture;
     private readonly ID3D11RenderTargetView[] targets;
     private readonly ID3D11VertexShader vertexShader;
     private readonly ID3D11PixelShader pixelShader;
@@ -48,16 +47,17 @@ public sealed class NativeStudioEnvironment : IDisposable
         this.renderer = renderer;
         var device = renderer.Device;
         int size = NativeSkyLighting.ReflectionSize, mips = NativeSkyLighting.ReflectionMips;
-        texture = device.CreateTexture2D(Format.R16G16B16A16_Float, (uint)size, (uint)size, mipLevels: (uint)mips,
+        var texture = device.CreateTexture2D(Format.R16G16B16A16_Float, (uint)size, (uint)size, mipLevels: (uint)mips,
             bindFlags: BindFlags.ShaderResource | BindFlags.RenderTarget);
         Reflection = new GpuTexture(texture, device.CreateShaderResourceView(texture), size, size, mipLevels: mips);
-        targets = Enumerable.Range(0, mips).Select(mip => device.CreateRenderTargetView(texture,
-            new RenderTargetViewDescription(texture, RenderTargetViewDimension.Texture2D, Format.R16G16B16A16_Float, (uint)mip))).ToArray();
+        targets = Enumerable.Range(0, mips).Select(mip => device.CreateRenderTargetView(texture, new RenderTargetViewDescription(
+            texture, RenderTargetViewDimension.Texture2D, Format.R16G16B16A16_Float, (uint)mip))).ToArray();
         vertexShader = device.CreateVertexShader(Dx11Renderer.Compile(Shader, "VSMain", "vs_5_0").Span);
         pixelShader = device.CreatePixelShader(Dx11Renderer.Compile(Shader, "PSStudio", "ps_5_0").Span);
         constants = device.CreateBuffer((uint)Marshal.SizeOf<Settings>(), BindFlags.ConstantBuffer);
         rasterizer = device.CreateRasterizerState(new RasterizerDescription(CullMode.None, FillMode.Solid));
-        noDepth = device.CreateDepthStencilState(new DepthStencilDescription(false, DepthWriteMask.Zero, ComparisonFunction.Always));
+        noDepth = device.CreateDepthStencilState(
+            new DepthStencilDescription(false, DepthWriteMask.Zero, ComparisonFunction.Always));
         opaque = device.CreateBlendState(new BlendDescription(Blend.One, Blend.Zero));
     }
 

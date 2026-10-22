@@ -11,7 +11,7 @@ public sealed class CreationDialog
     private const string PopupId = "###creation-workflow";
     private CreationWorkflow? workflow;
     private CreationFollowUp? followUp;
-    private bool open, anchoring, working, closing, showWarnings;
+    private bool open, anchoring, working, closing, showLimits;
     // Window sizes before scaling: the field form, and a workflow layout with columns side by side.
     private static readonly Vector2 FormSize = new(720, 700), LayoutSize = new(1240, 880);
 
@@ -21,7 +21,7 @@ public sealed class CreationDialog
     public void Open(CreationWorkflow value)
     {
         workflow = value; followUp = null;
-        open = true; anchoring = working = closing = showWarnings = false;
+        open = true; anchoring = working = closing = showLimits = false;
         CreationWidgets.Reset();
     }
 
@@ -105,45 +105,69 @@ public sealed class CreationDialog
     private void Cancel() { anchoring = working = false; followUp = null; workflow = null; ImGui.CloseCurrentPopup(); }
 
     /**
-     * The workflow's own layout over a footer: problems block the action, warnings only show and
-     * list on a click, and the action sits at the right after Cancel.
+     * The workflow's own layout over a one-line footer: what blocks the action, then the count of the workflow's limits
+     * as warnings, which list on a hover and open above the line on a click, then Cancel and the action at the right.
      */
     private void DrawLayout(StudioWorkspace workspace, float scale, IReadOnlyList<string> problems,
         Action<string, Action<string>> pickFile)
     {
-        var warnings = workflow!.Limits;
-        float line = ImGui.GetTextLineHeightWithSpacing();
-        int lines = (problems.Count != 0 ? 1 : 0) + (warnings.Count != 0 ? 1 : 0) + (showWarnings ? warnings.Count : 0)
-            + (workspace.Error.Length != 0 ? 2 : 0);
-        float footer = lines * line + ImGui.GetFrameHeightWithSpacing() + ImGui.GetStyle().ItemSpacing.Y * 3;
+        var limits = workflow!.Limits;
+        int empty = problems.Count(IsEmptyRequired);
+        string? first = problems.FirstOrDefault(problem => !IsEmptyRequired(problem));
+        string allProblems = string.Join("\n", problems), allLimits = string.Join("\n", limits);
+        int lines = (showLimits ? limits.Count : 0) + (workspace.Error.Length != 0 ? 2 : 0);
+        float footer = lines * ImGui.GetTextLineHeightWithSpacing() + ImGui.GetFrameHeightWithSpacing()
+            + ImGui.GetStyle().ItemSpacing.Y * 3;
         ImGui.BeginChild("##layout", new Vector2(0, -footer), ImGuiChildFlags.None);
         workflow.DrawLayout(workspace, pickFile);
         ImGui.EndChild();
         ImGui.Separator();
-        if (problems.Count != 0)
-        {
-            StudioUi.WarningIcon(StudioTheme.Problem);
-            ImGui.SameLine();
-            ImGui.TextColored(StudioTheme.Problem, problems.Count > 1 ? $"{problems[0]} (+{problems.Count - 1})" : problems[0]);
-            StudioUi.Tip(string.Join("\n", problems));
-        }
-        if (warnings.Count != 0)
-        {
-            StudioUi.WarningIcon(StudioTheme.Warning);
-            ImGui.SameLine();
-            string label = warnings.Count == 1 ? "1 Warning" : $"{warnings.Count} Warnings";
-            ImGui.PushStyleColor(ImGuiCol.Text, StudioTheme.Warning);
-            if (ImGui.Selectable(label, showWarnings, ImGuiSelectableFlags.None, ImGui.CalcTextSize(label))) showWarnings = !showWarnings;
-            ImGui.PopStyleColor();
-            StudioUi.Tip(showWarnings ? "" : string.Join("\n", warnings));
-            if (showWarnings)
-                foreach (string warning in warnings) { ImGui.Bullet(); ImGui.SameLine(); ImGui.TextUnformatted(warning); }
-        }
-        if (workspace.Error.Length != 0) { ImGui.PushTextWrapPos(0); ImGui.TextUnformatted(workspace.Error); ImGui.PopTextWrapPos(); }
+        if (showLimits)
+            foreach (string limit in limits)
+            {
+                StudioUi.WarningIcon(StudioTheme.Warning);
+                ImGui.SameLine();
+                ImGui.TextColored(StudioTheme.Warning, limit);
+            }
+        if (workspace.Error.Length != 0)
+        { ImGui.PushTextWrapPos(0); ImGui.TextUnformatted(workspace.Error); ImGui.PopTextWrapPos(); }
         // The footer's buttons are the form's width.
-        float button = 120 * scale, gap = ImGui.GetStyle().ItemSpacing.X;
-        if (anchoring || working) { ImGui.TextDisabled("Working..."); ImGui.SameLine(); }
-        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + Math.Max(0, ImGui.GetContentRegionAvail().X - button * 2 - gap));
+        float button = 120 * scale, gap = ImGui.GetStyle().ItemSpacing.X, start = ImGui.GetCursorPosX();
+        float buttons = start + Math.Max(0, ImGui.GetContentRegionAvail().X - button * 2 - gap);
+        bool lead = false;
+        ImGui.AlignTextToFramePadding();
+        // A blocking problem reads in full colour; empty required fields, which their fields already mark, only count.
+        if (first is not null)
+        {
+            StudioUi.WarningIcon(StudioTheme.Problem, framed: true);
+            ImGui.SameLine();
+            int more = problems.Count - 1;
+            ImGui.TextColored(StudioTheme.Problem, StudioUi.Fit(more > 0 ? $"{first} (+{more})" : first,
+                buttons - ImGui.GetCursorPosX() - gap * 5 - ImGui.GetTextLineHeight()
+                - ImGui.CalcTextSize($"{limits.Count} Warnings").X));
+            StudioUi.Tip(allProblems);
+            lead = true;
+        }
+        else if (empty != 0)
+        {
+            ImGui.TextDisabled(empty == 1 ? "1 required field empty" : $"{empty} required fields empty");
+            StudioUi.Tip(allProblems);
+            lead = true;
+        }
+        if (limits.Count != 0)
+        {
+            if (lead) ImGui.SameLine(0, gap * 3);
+            StudioUi.WarningIcon(StudioTheme.Warning, framed: true);
+            ImGui.SameLine();
+            ImGui.TextColored(StudioTheme.Warning, limits.Count == 1 ? "1 Warning" : $"{limits.Count} Warnings");
+            if (ImGui.IsItemHovered()) ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            if (ImGui.IsItemClicked()) showLimits = !showLimits;
+            StudioUi.Tip(showLimits ? "" : allLimits);
+            lead = true;
+        }
+        if (anchoring || working) { if (lead) ImGui.SameLine(0, gap * 3); ImGui.TextDisabled("Working..."); lead = true; }
+        if (lead) ImGui.SameLine();
+        ImGui.SetCursorPosX(buttons);
         if (ImGui.Button(working ? "Close" : "Cancel", new Vector2(button, 0))) { Cancel(); return; }
         if (working && ImGui.IsItemHovered()) ImGui.SetTooltip("The import continues in the background");
         ImGui.SameLine();

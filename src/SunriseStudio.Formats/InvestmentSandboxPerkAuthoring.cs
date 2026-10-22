@@ -18,11 +18,23 @@ public static class InvestmentSandboxPerkAuthoring
     public const uint DefinitionTableClass = 0x80807AAA, DefinitionRowClass = 0x80807AAE;
     public const uint RuntimeNameMapClass = 0x80809780, RuntimeNameRowClass = 0x80809252;
     private const int DefinitionStride = 8, DisplayStride = 24, TextStride = 28;
+    // A definition row whose byte +6 is clear is a display label with no gameplay effect.
+    private const int ActiveFlag = 6;
     private const int ArrayField = 8, TextArrayField = 24;
     // The native display default uses an unavailable bank and empty-name hashes.
     private const uint EmptyName = 0x811C9DC5, UnavailableBank = ushort.MaxValue;
     // The native perk UI compares this key when showing its exotic frame.
     private const uint ExoticPresentation = 0x85899A33;
+
+    /** False for a display label, which has no gameplay effect to read. */
+    public static bool IsActive(PackageCatalog catalog, int index)
+    {
+        RequireClass(catalog, DefinitionTableTag, DefinitionTableClass);
+        var reader = new TagReader(catalog.Read(DefinitionTableTag));
+        var rows = reader.Array(ArrayField, DefinitionRowClass, DefinitionStride);
+        if (index < 0 || index >= rows.Count) throw new InvalidDataException("The sandbox perk index is outside its table.");
+        return reader.U8(rows.Data + index * DefinitionStride + ActiveFlag) != 0;
+    }
 
     /** Active rows must resolve to a gameplay tag through the runtime name map. */
     public static SandboxPerkSource Read(PackageCatalog catalog, int index)
@@ -305,7 +317,7 @@ public static class InvestmentSandboxPerkAuthoring
                 throw new InvalidDataException($"Sandbox perk {i} differs between its index tables.");
         int row = checked(rows.Data + index * DefinitionStride);
         int label = checked(labels.Data + index * DisplayStride);
-        if (native.U8(row + 6) == 0)
+        if (native.U8(row + ActiveFlag) == 0)
             throw new InvalidDataException("This perk is a display label and has no active gameplay effect.");
         int text = display.Relative(label + 8);
         if (text < texts.Data || (text - texts.Data) % TextStride != 0

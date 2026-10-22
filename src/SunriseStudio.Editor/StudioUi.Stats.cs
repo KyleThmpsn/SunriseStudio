@@ -8,7 +8,7 @@ namespace SunriseStudio.Editor;
 /** Stat bars, the values beside them and a Total row, as the item tooltip draws them. */
 public static partial class StudioUi
 {
-    /** What mods add to a stat and take from it. */
+    /** What plugs add to a stat and take from it. */
     private static readonly Vector4 Added = new(.47f, .78f, .5f, 1), Taken = new(.9f, .45f, .4f, 1);
     // The raw value box is this wide and a bar never narrower than this, before scaling.
     private const float RawBox = 64, ShortestBar = 40;
@@ -56,10 +56,11 @@ public static partial class StudioUi
     /**
      * A stat's bar, when it has one, then the value the game shows at this x. What plugs change reads green or red on
      * the bar, or after a number with no bar.
-     * @param start The value without the mods.
+     * @param start The value before the plugs that change it.
      * @param tip What the value is made of.
      */
-    public static void StatReading(float x, float width, int value, int start, int maximum, bool bar, string tip, bool dim = false)
+    public static void StatReading(float x, float width, int value, int start, int maximum, bool bar, string tip,
+        bool dim = false)
     {
         ImGui.SameLine();
         ImGui.SetCursorPosX(x);
@@ -69,7 +70,7 @@ public static partial class StudioUi
             ImGui.SameLine(0, ImGui.GetStyle().ItemSpacing.X);
         }
         ImGui.AlignTextToFramePadding();
-        // A value the mods raise reads green and one they lower reads red.
+        // A value plugs raise reads green and one they lower reads red.
         var colors = ImGui.GetStyle().Colors;
         ImGui.TextColored(dim ? colors[(int)ImGuiCol.TextDisabled] : value > start ? Added : value < start ? Taken
             : colors[(int)ImGuiCol.Text], value.ToString(CultureInfo.InvariantCulture));

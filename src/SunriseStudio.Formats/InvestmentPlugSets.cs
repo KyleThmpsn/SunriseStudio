@@ -12,14 +12,16 @@ namespace SunriseStudio.Formats;
 public static class InvestmentPlugSets
 {
     // Set rows: {u32 hash, member array at +8}. Members: {u32 item index, condition array at +8, f32 weight at +24}.
-    private const int SetsField = 8, SetStride = 24, MembersField = 8, MemberStride = 32, ConditionField = 8;
+    // Conditions are 8-byte instructions with no pointers.
+    private const int SetsField = 8, SetStride = 24, MembersField = 8, MemberStride = 32, ConditionField = 8, ConditionStride = 8;
     private const uint SetClass = 0x80802DFF, MemberClass = 0x80802E03;
-    // The 32-bit FNV prime, which mixes a new set's members into its hash.
-    private const uint FnvPrime = 0x01000193;
     // The scan reads every item, so it runs once per investment catalog.
     private static readonly ConditionalWeakTable<InvestmentCatalog, IReadOnlySet<int>> rolledSets = new();
 
     private sealed record Member(int Index, byte[] Row, int At);
+
+    /** A set member's row and its condition array: the count, 8 class bytes and the instructions. */
+    public sealed record SetMember(byte[] Row, int Conditions, byte[] ConditionClass, byte[] ConditionRows);
 
     /** A set to append: its row, then its members with the absolute condition each names, or -1 for none. */
     private sealed record NewSet(byte[] Row, IReadOnlyList<(byte[] Row, int Condition)> Members);
@@ -28,6 +30,22 @@ public static class InvestmentPlugSets
     public static IReadOnlyList<int> SetsWith(ReadOnlyMemory<byte> table, int plug) =>
         [.. Read(table).Select((members, set) => (members, set))
             .Where(row => row.members.Any(member => member.Index == plug)).Select(row => row.set)];
+
+    /** The member of a set that names the plug, or null when the set does not list it. */
+    public static SetMember? MemberOf(ReadOnlyMemory<byte> table, int set, int plug)
+    {
+        var reader = new TagReader(table);
+        var sets = reader.Array(SetsField, SetClass, SetStride);
+        if (set >= sets.Count) throw new InvalidDataException("Socket plug set is outside its index.");
+        var members = reader.Array(sets.Data + set * SetStride + MembersField, MemberClass, MemberStride);
+        int at = Enumerable.Range(0, members.Count).Select(index => members.Data + index * MemberStride)
+            .FirstOrDefault(row => reader.U32(row) == plug, -1);
+        if (at < 0) return null;
+        var conditions = reader.Array(at + ConditionField, stride: ConditionStride);
+        return new(table.Span.Slice(at, MemberStride).ToArray(), conditions.Count,
+            conditions.Count == 0 ? [] : table.Span.Slice(conditions.Data - 8, 8).ToArray(),
+            table.Span.Slice(conditions.Data, conditions.Count * ConditionStride).ToArray());
+    }
 
     /** Sets some socket rolls from; a roll picks by member count, so these must not grow. */
     public static IReadOnlySet<int> RolledSets(PackageCatalog catalog, InvestmentCatalog investment) =>
@@ -44,7 +62,8 @@ public static class InvestmentPlugSets
                     var sockets = reader.Array(block, InvestmentSocketRows.RowClass, InvestmentSocketRows.Stride);
                     for (int socket = 0; socket < sockets.Count; socket++)
                     {
-                        ushort set = reader.U16(sockets.Data + socket * InvestmentSocketRows.Stride + InvestmentSocketRows.RandomizedSet);
+                        int row = sockets.Data + socket * InvestmentSocketRows.Stride;
+                        ushort set = reader.U16(row + InvestmentSocketRows.RandomizedSet);
                         if (set != ushort.MaxValue) rolled.Add(set);
                     }
                 }
@@ -54,8 +73,9 @@ public static class InvestmentPlugSets
         });
 
     /**
-     * The installed table with the members the project added, and `plug` beside `basePlug` in every set that lists the base
-     * and is not rolled from; with `listed` false, `plug` is in no set. Added members carry no condition.
+     * The installed table with the members and sets the project added, and `plug` beside `basePlug` in every installed set
+     * that lists the base and is not rolled from; with `listed` false, no installed set gains `plug`. Added members carry no
+     * condition.
      * @param current The project's table; its installed members must be unchanged.
      * @return The table and the sets that list the plug.
      */
@@ -89,8 +109,8 @@ public static class InvestmentPlugSets
         // Sets the project added, such as an item's own pool, keep their members and conditions.
         if (now.Count > stock.Count)
             table = AppendSets(table, [.. now.Skip(stock.Count).Select((members, index) => Copy(current, stock.Count + index,
-                members, condition => condition < installed.Length ? condition
-                    : throw new InvalidDataException("A project plug set member names a condition outside the installed table.")))],
+                members, condition => condition < installed.Length ? condition : throw new InvalidDataException(
+                    "A project plug set member names a condition outside the installed table.")))],
                 installed.Length);
         return (table, joined);
     }
@@ -120,7 +140,8 @@ public static class InvestmentPlugSets
             if (pool >= sets.Count) throw new InvalidDataException("Socket plug set is outside its index.");
             var members = sets[pool];
             // What the item comes with: the initial plug, the embedded members and the reusable set's members.
-            ushort initial = item.U16(row + InvestmentSocketRows.InitialPlug), reusable = item.U16(row + InvestmentSocketRows.ReusableSet);
+            ushort initial = item.U16(row + InvestmentSocketRows.InitialPlug);
+            ushort reusable = item.U16(row + InvestmentSocketRows.ReusableSet);
             var embedded = item.Array(row + InvestmentSocketRows.Members, MemberClass, MemberStride);
             var choices = Enumerable.Range(0, embedded.Count)
                 .Select(index => checked((int)item.U32(embedded.Data + index * MemberStride))).ToList();
@@ -138,23 +159,54 @@ public static class InvestmentPlugSets
             added.Add(copy with { Members = [.. copy.Members, .. extra] });
             pointers.Add(row);
         }
-        if (added.Count == 0) return (definition.ToArray(), null);
-        // Each new set takes a hash no set uses.
+        return added.Count == 0 ? (definition.ToArray(), null)
+            : Attach(definition, installed, current, sets.Count, added, pointers);
+    }
+
+    /**
+     * Gives a socket a randomized pool of exactly these plugs, in roll order, as a set of the item's own. A plug the pool
+     * holds keeps its member, weight and condition; any other copies the pool's first member with no condition.
+     */
+    public static (byte[] Definition, byte[] Table) SetPool(ReadOnlyMemory<byte> definition, ReadOnlyMemory<byte> installed,
+        ReadOnlyMemory<byte> current, int socket, IReadOnlyList<ushort> plugs)
+    {
+        var item = new TagReader(definition);
+        int block = item.Relative(InvestmentSocketRows.Field);
+        var rows = block < 0 ? default : item.Array(block, InvestmentSocketRows.RowClass, InvestmentSocketRows.Stride);
+        if (block < 0 || socket >= rows.Count) throw new InvalidDataException("The item has no such socket.");
+        int row = rows.Data + socket * InvestmentSocketRows.Stride;
+        ushort pool = item.U16(row + InvestmentSocketRows.RandomizedSet);
+        var sets = Read(current);
+        if (pool >= sets.Count || sets[pool].Length == 0)
+            throw new InvalidDataException("The socket has no randomized pool to copy.");
+        if (plugs.Count == 0) throw new InvalidDataException("A randomized pool needs at least one plug.");
+        var members = sets[pool];
+        var copy = Copy(current, pool, members, condition => condition);
+        var kept = plugs.Select(plug => Array.FindIndex(members, member => member.Index == plug) is var at and >= 0
+            ? copy.Members[at] : (Unconditional(members[0].Row, plug), -1)).ToList();
+        return Attach(definition, installed, current, sets.Count, [copy with { Members = kept }], [row]);
+    }
+
+    /** Appends sets past the table's last, each with a hash no set uses, and points these socket rows at them in order. */
+    private static (byte[] Definition, byte[] Table) Attach(ReadOnlyMemory<byte> definition, ReadOnlyMemory<byte> installed,
+        ReadOnlyMemory<byte> current, int count, List<NewSet> added, List<int> pointers)
+    {
         var reader = new TagReader(current);
         int data = reader.Array(SetsField, SetClass, SetStride).Data;
-        var hashes = new HashSet<uint>(Enumerable.Range(0, sets.Count).Select(set => reader.U32(data + set * SetStride)));
+        var hashes = new HashSet<uint>(Enumerable.Range(0, count).Select(set => reader.U32(data + set * SetStride)));
         foreach (var set in added)
         {
-            uint hash = BinaryPrimitives.ReadUInt32LittleEndian(set.Row);
-            foreach (var (member, _) in set.Members) hash = (hash ^ BinaryPrimitives.ReadUInt32LittleEndian(member)) * FnvPrime;
-            while (hash == 0 || !hashes.Add(hash)) hash++;
+            var words = set.Members.Select(member => member.Row).Prepend(set.Row)
+                .Select(row => BinaryPrimitives.ReadUInt32LittleEndian(row));
+            uint hash = InvestmentItemClone.NewDefinitionHash(string.Join(",", words), hashes);
+            hashes.Add(hash);
             BinaryPrimitives.WriteUInt32LittleEndian(set.Row, hash);
         }
-        if (sets.Count + added.Count > ushort.MaxValue) throw new InvalidDataException("The plug set table has no index left.");
+        if (count + added.Count > ushort.MaxValue) throw new InvalidDataException("The plug set table has no index left.");
         byte[] table = AppendSets(current, added, installed.Length), edited = definition.ToArray();
         for (int index = 0; index < pointers.Count; index++)
             BinaryPrimitives.WriteUInt16LittleEndian(edited.AsSpan(pointers[index] + InvestmentSocketRows.RandomizedSet),
-                checked((ushort)(sets.Count + index)));
+                checked((ushort)(count + index)));
         return (edited, table);
     }
 
@@ -201,7 +253,8 @@ public static class InvestmentPlugSets
         var grown = new TagReader(output).Array(SetsField, SetClass, SetStride);
         for (int index = 0; index < sets.Count; index++)
         {
-            int row = grown.Data + (rows.Count + index) * SetStride, header = starts[index] + InvestmentItemClone.TypedBlockHeader;
+            int row = grown.Data + (rows.Count + index) * SetStride;
+            int header = starts[index] + InvestmentItemClone.TypedBlockHeader;
             BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(row + MembersField), sets[index].Members.Count);
             BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(row + MembersField + 8), header - row - MembersField - 8L);
             for (int member = 0; member < sets[index].Members.Count; member++)

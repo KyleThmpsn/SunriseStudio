@@ -59,7 +59,8 @@ public static class AssetTooltip
     private static readonly char[] Marks = ['\0', '\uE143', '\uE140', '\uE144'];
     private static readonly Vector4[] MarkTints =
         [default, new(.47f, .82f, .96f, 1), new(.96f, .55f, .22f, 1), new(.70f, .49f, .93f, 1)];
-    // Icon table rows of the game's own Primary, Special and Heavy marks, which no item names.
+    // Icon table rows of the game's own Primary, Special and Heavy marks in the supported build. No item names them, so
+    // they cannot be looked up; a row that does not read leaves the mark off.
     private static readonly int[] AmmoMarks = [0, 8380, 8379, 8381];
     private static readonly InvestmentSources Sources = new();
 
@@ -72,9 +73,9 @@ public static class AssetTooltip
     private sealed record Perk(InvestmentItem Plug, bool Intrinsic);
     /** The figure an item leads with, its damage type, ammunition, armor energy and the word the row ends on. */
     private sealed record Lockup(int Figure, int Damage, int Ammo, int Energy, int EnergyType, string Label);
-    /** Title is the stat row the figure takes, or -1. */
+    /** Title is the stat row the figure takes, or -1. Note says when the Magazine did not read or may be inaccurate. */
     private sealed record Content(IReadOnlyList<Stat> Stats, int Ceiling, int Title, bool Armor, Lockup? Lockup,
-        IReadOnlyList<Perk> Perks);
+        IReadOnlyList<Perk> Perks, string Note);
 
     private sealed class Entry(Task<Content> work)
     {
@@ -118,12 +119,12 @@ public static class AssetTooltip
         if (named && item is null) workspace!.RequestInvestment();
         var entry = item is not null ? Request(item) : null;
         var content = entry?.Work.IsCompletedSuccessfully == true ? entry.Work.Result : null;
-        string error = entry?.Work.IsFaulted == true
-            ? "Stats and perks did not read: " + entry.Work.Exception!.GetBaseException().Message : "";
+        string notice = entry?.Work.IsFaulted == true
+            ? "Stats and perks did not read: " + entry.Work.Exception!.GetBaseException().Message : content?.Note ?? "";
         string description = item?.Description ?? "";
         int title = content?.Title ?? -1;
         bool stats = content is not null && content.Stats.Count > (title < 0 ? 0 : 1), perks = content?.Perks.Count > 0;
-        bool figures = content?.Lockup is not null || stats || perks || error.Length != 0;
+        bool figures = content?.Lockup is not null || stats || perks || notice.Length != 0;
         var preview = ItemPreview.Shared;
 
         float width = Width * scale;
@@ -142,31 +143,32 @@ public static class AssetTooltip
         }
         if (content?.Lockup is { } lockup) { Gap(); DrawLockup(lockup); }
         if (stats) { Gap(); DrawStats(content!, width); }
-        if (error.Length != 0)
+        if (notice.Length != 0)
         {
             Gap();
             ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + width);
-            Muted(error);
+            Muted(notice);
             ImGui.PopTextWrapPos();
         }
         for (int i = 0; i < (content?.Perks.Count ?? 0); i++)
         {
             if (i != 0) Rule();
-            DrawPerk(content!.Perks[i], preview?.Item(content.Perks[i].Plug), width);
+            DrawPerkRow(content!.Perks[i], preview?.Item(content.Perks[i].Plug), width);
         }
         // Text and the figure, whose digits run below the row they reserve, keep a padding under them.
-        bool figureLast = content?.Lockup is not null && !stats && error.Length == 0 && !perks;
-        End(description.Length != 0 && !figures || error.Length != 0 && !perks || figureLast);
+        bool figureLast = content?.Lockup is not null && !stats && notice.Length == 0 && !perks;
+        End(description.Length != 0 && !figures || notice.Length != 0 && !perks || figureLast);
     }
 
     /** A plug's tooltip, smaller than an item's: its band, the package line, then its description, else its perks'. */
     public static void DrawPlug(InvestmentItem plug)
     {
-        string package = workspace?.Catalog is { } catalog && catalog.TryGetEntry(plug.Tag, out var entry) ? entry.PackageName : "";
+        string package = workspace?.Catalog is { } catalog && catalog.TryGetEntry(plug.Tag, out var entry)
+            ? entry.PackageName : "";
         // The plug's figure and stats read as the item tooltip reads them, on a worker the first time.
         var work = workspace?.Investment is not null && workspace.Catalog is not null ? Request(plug).Work : null;
         DrawSmall(plug.Name, plug.TypeName, plug.Tier, plug.Bucket, ItemPreview.Shared?.NoIcon(plug) != true,
-            ItemPreview.Shared?.Item(plug), package, plug.Tag, Description(plug),
+            ItemPreview.Shared?.Item(plug), package, plug.Tag, PlugDescription(plug),
             work?.IsCompletedSuccessfully == true ? work.Result : null);
     }
 
@@ -206,12 +208,13 @@ public static class AssetTooltip
     }
 
     /** A plug's own description, else its perks' in order, each once; mods often leave their own blank. */
-    private static string Description(InvestmentItem plug)
+    public static string PlugDescription(InvestmentItem plug)
     {
         if (!string.IsNullOrWhiteSpace(plug.Description) || workspace?.Investment is not { } investment
             || workspace.Catalog is not { } catalog) return plug.Description;
         if (!PerkTexts.TryGetValue(plug.Tag, out var work))
-            PerkTexts.Add(plug.Tag, work = Task.Run(() => string.Join("\n\n", investment.ReadItem(plug.Tag, catalog.Read(plug.Tag)).Perks
+            PerkTexts.Add(plug.Tag, work = Task.Run(() => string.Join("\n\n",
+                investment.ReadItem(plug.Tag, catalog.Read(plug.Tag)).Perks
                 .Select(perk => perk.Index < investment.PerkCount ? investment.PerkDefinitions[perk.Index].Description : "")
                 .Where(text => !string.IsNullOrWhiteSpace(text)).Distinct())));
         return work.IsCompletedSuccessfully ? work.Result : "";
@@ -237,6 +240,7 @@ public static class AssetTooltip
     {
         if (text) ImGui.Dummy(new(0, Padding * scale));
         if (fonts is not null) ImGui.PopFont();
+        else ImGui.SetWindowFontScale(1);
         ImGui.EndTooltip();
         ImGui.PopStyleColor(2);
         ImGui.PopStyleVar(3);
@@ -263,29 +267,33 @@ public static class AssetTooltip
         var detail = investment.ReadItem(item.Tag, catalog.Read(item.Tag));
         var plugs = detail.Sockets.Where(socket => socket.InitialPlug < investment.Items.Count)
             .Select(socket => investment.Items[socket.InitialPlug]).ToArray();
-        var totals = new Dictionary<byte, int>();
-        foreach (var stat in detail.Stats.Concat(plugs.SelectMany(plug => PlugStats(investment, catalog, plug))))
-            totals[stat.Index] = totals.GetValueOrDefault(stat.Index) + stat.Value;
+        var sources = ItemStatGroup.PlugStats(investment, catalog,
+            detail.Sockets.Select(socket => (socket.InitialPlug, socket.Type)));
+        var totals = ItemStatGroup.Totals(detail.Stats, sources);
         bool armor = item.Category == InvestmentCategory.Armor;
         var group = ItemStatGroup.Read(catalog, item);
         // Armor shows every bar of its group, a zero roll empty.
         var shown = group is null ? totals.Keys.Order()
             : group.Stats.Keys.Where(stat => totals.ContainsKey(stat) || armor && group.Bar(stat)).OrderBy(group.Order);
-        // An unnamed stat is bookkeeping no player is shown.
+        var magazine = ItemStatGroup.Magazine(investment, catalog, item, totals);
+        // An unnamed stat is bookkeeping no player is shown, and the game leaves out a magazine that holds no shot.
         var stats = shown.Where(stat => investment.StatName(stat) != $"Stat {stat}").Select(stat =>
         {
             int value = totals.GetValueOrDefault(stat);
             return new Stat(stat, investment.StatName(stat),
-                detail.DisplayCurves.TryGetValue(stat, out var curve) ? curve.Evaluate(value) : value, group?.Bar(stat) == false);
-        }).ToList();
-        // Gear leads with its Power, anything else with its first declared stat.
+                ItemStatGroup.Curve(detail, stat, magazine)?.Evaluate(value) ?? value, group?.Bar(stat) == false);
+        }).Where(stat => stat.Index != WeaponTranslationEdits.MagazineStat || magazine?.Curve is null || stat.Value != 0).ToList();
+        // Gear leads with its Power, anything else with a stat block with its first declared stat. A plug has no stat
+        // block, so its stats are all changes.
         bool gear = item.Category is InvestmentCategory.Weapons or InvestmentCategory.Armor;
-        int title = gear || detail.Stats.Count == 0 ? -1 : stats.FindIndex(stat => stat.Index == detail.Stats[0].Index);
+        bool block = item.DisplayTag != 0 && InvestmentStatGroups.HasStatBlock(catalog.Read(item.DisplayTag));
+        int title = gear || !block || detail.Stats.Count == 0 ? -1
+            : stats.FindIndex(stat => stat.Index == detail.Stats[0].Index);
         var lockup = gear ? ReadLockup(investment, catalog, item, detail, totals)
             : title >= 0 ? new Lockup(stats[title].Value, 0, 0, 0, 0, stats[title].Name.ToUpperInvariant()) : null;
         var perks = plugs.Where(plug => Listed(catalog, plug))
             .Select(plug => new Perk(plug, plug.TypeName.Contains("intrinsic", StringComparison.OrdinalIgnoreCase))).ToList();
-        return new(stats, group?.Full ?? DefaultCeiling, title, armor, lockup, perks);
+        return new(stats, group?.Full ?? DefaultCeiling, title, armor, lockup, perks, magazine?.Note ?? "");
     }
 
     /**
@@ -305,8 +313,8 @@ public static class AssetTooltip
         {
             int damage = InvestmentDamageType.Installed(investment)
                 ? InvestmentDamageType.ReadWeapon(investment, catalog, item) ?? 0 : 0;
-            return InvestmentAmmo.Read(catalog, item) is { } ammo
-                ? new(power, damage, ammo, 0, 0, InvestmentAmmo.Name(ammo).ToUpperInvariant())
+            return InvestmentAmmoType.Read(catalog, item) is { } ammo
+                ? new(power, damage, ammo, 0, 0, InvestmentAmmoType.Name(ammo).ToUpperInvariant())
                 : new(power, damage, 0, 0, 0, investment.StatName(PowerStat).ToUpperInvariant());
         }
         // Energy capacity is a stat of its own, named for the energy type it holds.
@@ -318,14 +326,6 @@ public static class AssetTooltip
             return new(power, 0, 0, value, Math.Max(type, 0), "ENERGY");
         }
         return new(power, 0, 0, 0, 0, investment.StatName(DefenseStat).ToUpperInvariant());
-    }
-
-    /** A plug that does not read adds nothing, so the item's own stats still show. */
-    private static IReadOnlyList<InvestmentStat> PlugStats(InvestmentCatalog investment, PackageCatalog catalog,
-        InvestmentItem plug)
-    {
-        try { return investment.ReadItem(plug.Tag, catalog.Read(plug.Tag)).Stats; }
-        catch (Exception error) when (error is InvalidDataException or KeyNotFoundException) { return []; }
     }
 
     /** Named plugs only: an unnamed one carries its package name or index, and empty and default plugs stay off. */
@@ -510,7 +510,8 @@ public static class AssetTooltip
                 sum += stat.Value;
             }
             // Armor signs its stats; a number starts where a bar would.
-            string value = ((content.Armor || signed) && stat.Value > 0 ? "+" : "") + stat.Value.ToString(CultureInfo.InvariantCulture);
+            string value = ((content.Armor || signed) && stat.Value > 0 ? "+" : "")
+                + stat.Value.ToString(CultureInfo.InvariantCulture);
             draw.AddText(new(stat.Numeric ? barLeft : barLeft + barWidth + gap, top), text, value);
             top += rowHeight;
         }
@@ -524,7 +525,7 @@ public static class AssetTooltip
     }
 
     /** One default perk: its icon, then its name. The intrinsic sits on a panel. */
-    private static void DrawPerk(Perk perk, ItemIcon? icon, float width)
+    private static void DrawPerkRow(Perk perk, ItemIcon? icon, float width)
     {
         float rowHeight = PerkRowHeight * scale, size = PerkIconExtent * scale, column = size + PerkIconPadding * 2 * scale;
         var draw = ImGui.GetWindowDrawList();

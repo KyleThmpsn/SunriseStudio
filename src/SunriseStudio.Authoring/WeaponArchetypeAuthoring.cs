@@ -5,10 +5,10 @@ using SunriseStudio.Projects;
 
 namespace SunriseStudio.Authoring;
 
-/** Holder is the variant's index among the arrangement row's art regions. */
 public sealed record WeaponArtVariant(int Selector, uint WrapperTag, uint EntityTag,
     IReadOnlyList<uint> ArtHashes)
 {
+    /** The variant's index among the arrangement row's art regions. */
     public int Holder { get; init; }
 }
 public sealed record WeaponArchetypeSource(ushort GearIndex, ushort ArtIndex, uint EntityTag,
@@ -32,7 +32,7 @@ public static class WeaponArchetypeAuthoring
     private const uint RuntimeMapClass = 0x80809780, RuntimeMapRowClass = 0x80809252;
     private const uint HolderClass = 0x80805DFE, ArtHashClass = 0x80805E01;
     private const uint EntityClass = 0x80809C0F, WrapperClass = 0x8080744A;
-    private const uint ArrayMarker = 0x80809FBD, EmptyName = 0x811C9DC5;
+    private const uint ArrayMarker = 0x80809FBD;
     // Native readers use signed 16-bit row indices.
     private const int MaximumRows = short.MaxValue + 1;
 
@@ -67,15 +67,16 @@ public static class WeaponArchetypeAuthoring
             if (group < 0) throw new InvalidDataException("An art variant has no group.");
             int selector = table.U8(group);
             var hashes = table.Array(group + 8, ArtHashClass, 4);
-            // A region with no art is optional and adds nothing to the weapon: no hashes, an empty first name
-            // (0, 0xFFFFFFFF or 0x811C9DC5, the hash of no text) or a wrapper that names no model.
-            if (hashes.Count == 0 || table.U32(hashes.Data) is 0 or uint.MaxValue or EmptyName) continue;
+            // A region with no art is optional and adds nothing to the weapon: no hashes, an empty first name or a wrapper
+            // that names no model.
+            if (hashes.Count == 0 || table.U32(hashes.Data) is 0 or uint.MaxValue or InvestmentItemClone.EmptyStringHash)
+                continue;
             uint[] values = Enumerable.Range(0, hashes.Count)
                 .Select(index => table.U32(hashes.Data + index * 4)).ToArray();
             uint wrapper = Resolve(artMap, ArtMapRowClass, values[0]);
             var wrapperBytes = Read(catalog, wrapper, WrapperClass);
             uint modelEntity = wrapperBytes.U32(16);
-            if (modelEntity == uint.MaxValue) continue;
+            if (modelEntity is 0 or uint.MaxValue) continue;
             Read(catalog, modelEntity, EntityClass);
             variants.Add(new(selector, wrapper, modelEntity, values) { Holder = i });
         }

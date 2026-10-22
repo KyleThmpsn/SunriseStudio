@@ -740,7 +740,8 @@ public sealed partial class StudioForm : Form
             && (layout.Find(StudioPanelKind.Preview) is not null || IsPoppedOut(StudioPanelKind.Preview));
         context = context with
         {
-            PopOutPreview = () => pendingLayoutChange = () => OpenPopout(StudioPanelKind.Preview, null),
+            PopOutPreview = workspace.World is null && !IsPoppedOut(StudioPanelKind.Preview)
+                ? () => pendingLayoutChange = () => OpenPopout(StudioPanelKind.Preview, null) : null,
             PreviewElsewhere = previewElsewhere,
             PreviewChoice = width => DrawPreviewChoice(document, width)
         };
@@ -780,7 +781,8 @@ public sealed partial class StudioForm : Form
         float extent = wide ? available.X : available.Y, divider = 6 * scale;
         float pane = MathF.Max(150 * scale, extent * settings.ModelPaneShare);
         context.PreviewBox("model-pane", wide ? new(pane, available.Y) : new(available.X, pane),
-            () => pages.Pages.FirstOrDefault(page => page.Id == StudioCategories.PreviewPageId)?.Draw(context with { PreviewChoice = null }));
+            () => pages.Pages.FirstOrDefault(page => page.Id == StudioCategories.PreviewPageId)
+                ?.Draw(context with { PreviewChoice = null }));
         // The divider drags the pane's share; a double click returns it to the default.
         if (wide) ImGui.SameLine(0, 0);
         ImGui.InvisibleButton("model-pane-divider", wide ? new(divider, available.Y) : new(available.X, divider));

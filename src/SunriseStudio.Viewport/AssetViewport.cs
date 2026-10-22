@@ -610,7 +610,8 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
     private Quaternion PoseTurn(MeshData mesh)
     {
         var rest = mesh.Vertices;
-        if (selection.PosedPositions(mesh) is not { } posed || posed.Count != rest.Length || rest.Length < 3) return Quaternion.Identity;
+        if (selection.PosedPositions(mesh) is not { } posed || posed.Count != rest.Length || rest.Length < 3)
+            return Quaternion.Identity;
         int Extreme(Func<Vector3, float> measure, bool most) => Enumerable.Range(0, rest.Length)
             .Aggregate((a, b) => (measure(rest[b].Position) > measure(rest[a].Position)) == most ? b : a);
         int left = Extreme(p => p.X, false), right = Extreme(p => p.X, true);
@@ -762,7 +763,8 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
     {
         bool over = ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem)
             && ImGui.IsMouseHoveringRect(origin, origin + size);
-        toolsShown = ToolsPinned || over || toolsShown && ImGui.IsPopupOpen("", ImGuiPopupFlags.AnyPopupId | ImGuiPopupFlags.AnyPopupLevel);
+        toolsShown = ToolsPinned || over
+            || toolsShown && ImGui.IsPopupOpen("", ImGuiPopupFlags.AnyPopupId | ImGuiPopupFlags.AnyPopupLevel);
         if (!toolsShown) return;
         ImGui.SetCursorScreenPos(origin);
         ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(.055f, .065f, .08f, .88f));
@@ -944,7 +946,7 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
         ImGui.SetCursorScreenPos(start with { X = right - width });
         if (PopOut is { } popOut)
         {
-            if (ImGuiIcons.Button("pop-out", StudioIcon.Window, "Open in its own window")) popOut();
+            if (ImGuiIcons.Button("pop-out", StudioIcon.PopOut, "Open in its own window")) popOut();
             ImGui.SameLine(0, gap);
         }
         bool pinned = ToolsPinned;
@@ -1624,7 +1626,7 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
         DrawOverlayLines(LineStream.SelectedPoints, CollectionsMarshal.AsSpan(selectedOverlayLines), view, false);
     }
 
-    /** The cursor's world axes and rings stay visible through scene depth. */
+    /** The cursor's axes and rings stay visible through scene depth; they turn with the frame the grid lies in. */
     private void DrawCursor(Matrix4x4 view, int height)
     {
         // A fixed pixel radius keeps the orbit center readable at every zoom level.
@@ -1637,6 +1639,7 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
             var direction = Vector3.Zero; direction[axis] = radius * 1.5f;
             var color = axis switch { 0 => new Vector4(1, .2f, .2f, 1),
                 1 => new Vector4(.25f, 1, .35f, 1), _ => new Vector4(.3f, .6f, 1, 1) };
+            direction = Vector3.Transform(direction, Camera.Basis);
             overlayLines.Add(new(Camera.Pivot - direction, color));
             overlayLines.Add(new(Camera.Pivot + direction, color));
             for (int segment = 0; segment < ringSegments; segment++)
@@ -1651,7 +1654,7 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
                 var offset = Vector3.Zero;
                 offset[(axis + 1) % 3] = MathF.Cos(angle) * radius;
                 offset[(axis + 2) % 3] = MathF.Sin(angle) * radius;
-                return Camera.Pivot + offset;
+                return Camera.Pivot + Vector3.Transform(offset, Camera.Basis);
             }
         }
         DrawOverlayLines(LineStream.Cursor, CollectionsMarshal.AsSpan(overlayLines), view, false);

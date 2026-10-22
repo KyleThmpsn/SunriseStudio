@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using SunriseStudio.Editor;
 using SunriseStudio.Formats;
 using SunriseStudio.Packages;
 
@@ -43,8 +44,9 @@ internal static class InvestmentDisplayChecks
         catalog.ReadOverride = tag => tag == first + 4 ? changedGroups : tag == first + 3 ? changedDisplay : null;
         var detail = data.ReadItem(first + 2, item);
         Check(detail.DisplayCurves[14].GroupHash == 0x12345678 && detail.DisplayCurves[14].Evaluate(3) == 2
-            && !detail.DisplayCurves.ContainsKey(24) && detail.Diagnostics.Any(value => value.StartsWith("Magazine", StringComparison.Ordinal)),
-            "Typed display group was not resolved or magazine was labelled final.");
+            && !detail.DisplayCurves.ContainsKey(24)
+            && !detail.Diagnostics.Any(value => value.StartsWith("Stat display:", StringComparison.Ordinal)),
+            "Typed display group was not resolved, magazine took its curve or a valid group reported an error.");
         changedGroups = (byte[])groups.Clone(); I(changedGroups, 248, 0);
         Invalid("Unordered display curve was accepted.");
         changedGroups = (byte[])groups.Clone(); U(changedGroups, 232, 0x80807D1B);
@@ -80,12 +82,29 @@ internal static class InvestmentDisplayChecks
         Check(raw.Value == 80 && detail.DisplayCurves.TryGetValue(14, out var curve)
             && curve.GroupIndex == 21 && curve.GroupHash == 0xEAEF4EA1 && curve.Evaluate(raw.Value) == 600,
             "Forward Path did not resolve its native RPM display curve.");
-        Check(!detail.DisplayCurves.ContainsKey(24), "Magazine context was replaced by a base curve.");
+        Magazines(data, catalog);
         byte[] edited = data.Edit(tag, original, raw.Field, "81");
         var after = data.ReadItem(tag, edited);
         Check(after.Stats.Single(value => value.Index == 14).Value == 81 && after.DisplayCurves[14].Evaluate(81) == 606
             && catalog.ReadOriginal(tag).SequenceEqual(original), "Display preview replaced raw editing or changed the source.");
         Console.WriteLine("investment_display owned=81319AF9 group=21 raw_rpm=80 display_rpm=600 raw_edit=preserved");
+    }
+
+    /** Every stock weapon's Magazine reads, or its translator writes no capacity. */
+    private static void Magazines(InvestmentCatalog data, PackageCatalog catalog)
+    {
+        int translated = 0;
+        foreach (var weapon in data.Items.Where(item => item.Category == InvestmentCategory.Weapons))
+        {
+            var detail = data.ReadItem(weapon.Tag, catalog.Read(weapon.Tag));
+            var totals = ItemStatGroup.Totals(detail.Stats,
+                ItemStatGroup.PlugStats(data, catalog, detail.Sockets.Select(socket => (socket.InitialPlug, socket.Type))));
+            var magazine = ItemStatGroup.Magazine(data, catalog, weapon, totals);
+            Check(magazine is null || magazine.Curve is not null, $"{weapon.Name} {weapon.Tag:X8}: {magazine?.Note}");
+            if (magazine is not null) translated++;
+        }
+        Check(translated > 0, "No stock weapon has a translated Magazine.");
+        Console.WriteLine($"investment_display magazines={translated}");
     }
 
     private static byte[] Index(uint tag)

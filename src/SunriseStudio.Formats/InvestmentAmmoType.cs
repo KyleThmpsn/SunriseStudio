@@ -4,7 +4,7 @@ using SunriseStudio.Packages;
 namespace SunriseStudio.Formats;
 
 /** A weapon's ammo type as its display records it: 1 Primary, 2 Special, 3 Heavy, 0 for none. */
-public static class InvestmentAmmo
+public static class InvestmentAmmoType
 {
     // A weapon display's ammo classification: class word at +316, u16 type at +320.
     private const int ClassField = 316, TypeField = 320;

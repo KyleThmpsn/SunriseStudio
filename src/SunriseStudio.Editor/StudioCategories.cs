@@ -30,6 +30,19 @@ public static partial class StudioCategories
     private static StudioCategory[] all = [];
     private static Dictionary<string, StudioCategory> byName = new(StringComparer.Ordinal);
     private static Func<PackageEntry, StudioCategoryMatch?>[] testRules = [];
+    // Icon art from the game's own menus, drawn by the home view in place of a category's Icon. No installed table maps a
+    // category to its art, so each is chosen by hand; one that does not read falls back to the vector Icon.
+    internal static readonly IReadOnlyDictionary<string, uint> IconTags = new Dictionary<string, uint>(StringComparer.Ordinal)
+    {
+        [InvestmentItemKinds.Weapons] = 0x8132E4A0, [InvestmentItemKinds.Armor] = 0x80BA206F,
+        [InvestmentItemKinds.Ghosts] = 0x81321605, [InvestmentItemKinds.Vehicles] = 0x813215FF,
+        [InvestmentItemKinds.Ships] = 0x81321601, [InvestmentItemKinds.Subclasses] = 0x813277B1,
+        [InvestmentItemKinds.Shaders] = 0x81321697, [InvestmentItemKinds.Emotes] = 0x813216A1,
+        [InvestmentItemKinds.ClanBanners] = 0x80BC6090, [InvestmentItemKinds.Mods] = 0x80B46AC5,
+        [InvestmentItemKinds.Engrams] = 0x80BC6093, [InvestmentItemKinds.Consumables] = 0x81326120,
+        [InvestmentItemKinds.Quests] = 0x80BC659A, [VendorsName] = 0x8132086B, [PerksName] = 0x81611CEB,
+        [GuardiansName] = 0x80B47ED7, [AudioName] = 0x81320819
+    };
 
     /** Items, then World, then Content; registration order within a group. */
     public static IReadOnlyList<StudioCategory> All => all;

@@ -53,6 +53,7 @@ public sealed partial class InvestmentCatalog
                 var allowed = new HashSet<ushort>();
                 if (plug < Items.Count) allowed.Add(plug);
                 List<ushort> reusable = [], randomized = [];
+                (int, uint) randomizedSet = (-1, 0);
                 void Members(TagReader source, int descriptor, List<ushort>? list = null)
                 {
                     var members = source.Array(descriptor, stride: 32);
@@ -76,11 +77,13 @@ public sealed partial class InvestmentCatalog
                             if (set == ushort.MaxValue) continue;
                             if (set >= shared.Count) throw new InvalidDataException("Socket plug set is outside its index.");
                             Members(sets, shared.Data + set * 24 + 8, list);
+                            if (list == randomized) randomizedSet = (set, sets.U32(shared.Data + set * 24));
                         }
                     }, $"Socket {i} shared plugs");
                 sockets.Add(new(i, data.U16(p), plug, ItemName(plug), data.UShort("Socket type", p, true),
-                    data.UShort("Initial plug", p + InvestmentSocketRows.InitialPlug, true), allowed.OrderBy(index => ItemName(index), StringComparer.OrdinalIgnoreCase).ToArray())
-                { ReusablePlugs = reusable, RandomizedPlugs = randomized });
+                    data.UShort("Initial plug", p + InvestmentSocketRows.InitialPlug, true),
+                    allowed.OrderBy(index => ItemName(index), StringComparer.OrdinalIgnoreCase).ToArray())
+                { ReusablePlugs = reusable, RandomizedPlugs = randomized, RandomizedSet = randomizedSet });
             }
         }, "Sockets");
         var curves = ReadDisplayCurves(item, errors);

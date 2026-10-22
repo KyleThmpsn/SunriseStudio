@@ -40,9 +40,9 @@ public sealed partial class StudioWorkspace
     }
 
     /** Runs on a worker. An armor item without a readable model still opens, with the reason as a preview note. */
-    private StudioDocument ReadArmorModelDocument(PackageCatalog catalog, PackageEntry entry, string name, AssetOpenContext context)
+    private StudioDocument ReadArmorModelDocument(PackageCatalog catalog, PackageEntry entry, string name,
+        AssetOpenContext context, StudioDocument document)
     {
-        var document = ReadDocument(catalog, entry, name, false, new AssetOpenContext());
         PreparedGuardian prepared;
         IReadOnlyList<ArmorWearer> wearers;
         try
@@ -50,7 +50,8 @@ public sealed partial class StudioWorkspace
             ReportProgress("Assembling armor");
             var assembler = GuardianAssemblerFor(catalog);
             wearers = assembler.Wearers(entry.TagHash);
-            var wearer = wearers.FirstOrDefault(value => value.Class.BodyTag == context.EntityTag && value.Female == context.ArmorFemale);
+            var wearer = wearers.FirstOrDefault(value => value.Class.BodyTag == context.EntityTag
+                && value.Female == context.ArmorFemale);
             prepared = assembler.PrepareItem(entry.TagHash, wearer, OperationToken);
         }
         catch (Exception error) when (error is not (OperationCanceledException or OutOfMemoryException))

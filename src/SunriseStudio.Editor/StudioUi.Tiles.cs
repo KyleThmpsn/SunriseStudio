@@ -66,7 +66,6 @@ public static partial class StudioUi
         }
     }
 
-
     /** Name and value pairs on shared lines, each beside the last when it fits; an editable value takes a field's box. */
     public sealed class Pairs
     {

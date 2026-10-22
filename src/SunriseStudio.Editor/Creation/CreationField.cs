@@ -11,9 +11,11 @@ public sealed record CreationChoice(uint Value, string Label, string Detail = ""
  * A filter over row picker rows: a dropdown, or a checkbox that keeps the rows with its one choice.
  * @param Value The row's choice value, or null when it has none; Worker-safe: fixed data reads only.
  * @param Default The value the filter starts at and Reset returns to; uint.MaxValue lets every row through.
+ * @param Widening Each choice keeps the rows whose value is at most its own, so later choices widen earlier ones; it has
+ *     no Any.
  */
 public sealed record RowFacet(string Name, IReadOnlyList<CreationChoice> Choices, Func<BrowserAsset, uint?> Value,
-    uint Default = uint.MaxValue, bool Checkbox = false);
+    uint Default = uint.MaxValue, bool Checkbox = false, bool Widening = false);
 
 /**
  * A field part that can be made new in place of picking an existing asset.

@@ -111,8 +111,8 @@ public sealed class NativeSceneComposite : IDisposable
      * @param flat One colour in place of the gradient, such as an asset preview's backdrop; null draws the gradient.
      * @param up The gradient's zenith direction; null is world up. An item orbited in its own frame passes that frame's up.
      */
-    public void DrawSkyGradient(NativeRenderTargets sky, ID3D11ShaderResourceView depth, Matrix4x4 viewProjection, float scale = 1,
-        Vector3? flat = null, Vector3? up = null)
+    public void DrawSkyGradient(NativeRenderTargets sky, ID3D11ShaderResourceView depth, Matrix4x4 viewProjection,
+        float scale = 1, Vector3? flat = null, Vector3? up = null)
     {
         if (!Matrix4x4.Invert(viewProjection, out var inverse)) throw new InvalidOperationException("The view cannot be inverted.");
         renderer.Context.OMSetRenderTargets(sky.Views, null);

@@ -261,8 +261,8 @@ public sealed partial class NativeSceneRenderer : IDisposable
     // Asset previews hold one exposure, as the game's inspect screen does, so a black weapon stays black instead of
     // metering up to middle grey. The value is where the meter settled for light weapons under the studio key.
     private const float AssetViewerStops = 1.5f;
-    // An asset's backdrop is one dark blue-grey, about as bright as the viewer gradient so the sky meter and the
-    // transparents it exposes stay where they were. The gain alone darkens it; through the film curve it shows as
+    // An asset's backdrop is one dark blue-grey, about as bright as the viewer gradient, so the sky meter and the
+    // transparents it exposes read as they do over the gradient. The gain alone darkens it; through the film curve it shows as
     // sRGB 24, 28, 35.
     private static readonly Vector3 AssetBackdrop = new Vector3(.85f, 1, 1.35f) * .045f;
     private const float AssetBackdropGain = .13f;
@@ -281,6 +281,8 @@ public sealed partial class NativeSceneRenderer : IDisposable
             if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value));
             if (lightingMode == value) return;
             lightingMode = value;
+            // An asset preview holds its exposure only under its studio key; other lighting meters as maps do.
+            if (Plan.AssetPreview) AutoExposure = value != NativeLightingMode.Studio;
             RequestExposureWarmup();
         }
     }
@@ -347,7 +349,8 @@ public sealed partial class NativeSceneRenderer : IDisposable
         + (AtmosphereActive ? " " + NativeAtmosphere.Policy
             : " Sky fallback: a labelled viewer gradient stands in for the atmosphere lookup; the map has no usable placed atmosphere.")
         + (SkyLightingActive ? " " + NativeSkyLighting.Policy : "")
-        + (StudioLightingActive ? " Studio lighting uses a neutral inspection environment with no atmospheric fog." : "")
+        + (StudioLightingActive ? Plan.AssetPreview ? " " + NativeStudioEnvironment.Policy
+            : " Studio lighting uses a neutral inspection environment with no atmospheric fog." : "")
         + (DeferredActive ? " " + NativeDeferredShading.Policy : " The viewer composite uses diffuse lighting.")
         + $" Ambient intensity 0x{AmbientIntensityKey:X8} = {AmbientIntensity:F2} unless overridden; the viewer default is 1, the authored default 0."
         + (Plan.ParameterOverrides is { Count: > 0 } overrides ? " Explicit TFX parameter overrides: "
@@ -944,7 +947,8 @@ public sealed partial class NativeSceneRenderer : IDisposable
             ? lookup.View : absentTexture.View;
         var noise = textures.GetValueOrDefault(Plan.WindNoiseTexture)?.View ?? absentTexture.View;
         // The transparent pass binds sky_hemisphere_mips as extern 3 resource 19; 0x7FF742E96782.
-        var environment = (SkyLightingActive ? skyLighting?.Reflection : StudioLightingActive ? studioReflection : null)?.View
+        var environment = (SkyLightingActive ? skyLighting?.Reflection
+            : StudioLightingActive ? Plan.AssetPreview ? studioEnvironment?.Reflection : studioReflection : null)?.View
             ?? absentTexture.View;
         Span<ID3D11ShaderResourceView?> current = [refraction.Textures[0].View, screenUv.View, lookup2D,
             skyLookup.Textures[0].View, gbuffer.NormalRead.View, sceneDepth ?? absentTexture.View, gbuffer.StencilRead, environment];

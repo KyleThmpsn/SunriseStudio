@@ -1,6 +1,6 @@
 namespace SunriseStudio.Formats;
 
-/** An item's quality block lists one power cap row per version; the cap table holds the caps, in tenths of Power. */
+/** An item's quality block lists one power cap row per version; the cap table holds each cap divided by ten. */
 public static class InvestmentPowerCaps
 {
     public const uint TableClass = 0x80807797;

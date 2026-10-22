@@ -14,8 +14,8 @@ public sealed record PreparedGuardian(SceneDocument Scene, AssetAnimationSource?
     GuardianParts Parts, IReadOnlyList<string> Diagnostics, IReadOnlySet<uint> SourceTags,
     IReadOnlyDictionary<string, IReadOnlyList<string>> SlotNotes);
 
-/** A guardian that wears an armor item in its preview. */
-public sealed record ArmorWearer(GuardianClass Class, bool Female)
+/** A guardian that wears an armor item in its preview; EntityTag is the item's model entity for that class and gender. */
+public sealed record ArmorWearer(GuardianClass Class, bool Female, uint EntityTag)
 {
     public string Name => $"{Class.Name} {GuardianAppearance.GenderNames[Female ? 1 : 0]}";
 }
@@ -131,10 +131,10 @@ public sealed class GuardianAssembler(PackageCatalog catalog)
             foreach (bool female in (bool[])[false, true])
                 try
                 {
-                    if (GuardianArt.ItemEntities(Catalog, item, guardianClass.ClassByte, female).Count != 0)
-                        wearers.Add(new(guardianClass, female));
+                    if (GuardianArt.ItemEntities(Catalog, item, guardianClass.ClassByte, female) is [var entity, ..])
+                        wearers.Add(new(guardianClass, female, entity));
                 }
-                catch (InvalidDataException) { }
+                catch (Exception error) when (error is InvalidDataException or KeyNotFoundException or ArgumentException) { }
         return wearers;
     }
 

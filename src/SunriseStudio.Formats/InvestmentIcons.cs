@@ -11,8 +11,8 @@ public sealed record InvestmentIcon(uint ContainerTag, uint BitmapTag, TextureDa
 
 public sealed partial class InvestmentCatalog
 {
-    // Icon container layers in draw order.
-    private const int ArtworkOffset = 20, PlateOffset = 28, WatermarkOffset = 32, ForegroundOffset = 36;
+    // Icon container layers in draw order. A container is read only when its record is this long.
+    private const int ArtworkOffset = 20, PlateOffset = 28, WatermarkOffset = 32, ForegroundOffset = 36, ContainerLength = 128;
     private const uint BitmapClass = 0x80804A69, ContainerClass = 0x80804A53;
     private static readonly int[] LayerOffsets = [PlateOffset, ArtworkOffset, WatermarkOffset, ForegroundOffset];
 
@@ -32,6 +32,7 @@ public sealed partial class InvestmentCatalog
         perk >= 0 && perk < PerkDefinitions.Count && PerkDefinitions[perk].IconIndex != ushort.MaxValue
         && catalog.ContainsTag(sources.Icons) ? ReadIcon(PerkDefinitions[perk].IconIndex, token) : null;
 
+    /** One shared icon row, without an item's season watermark. */
     public InvestmentIcon? ReadIcon(int index, CancellationToken token = default) => ReadIcon(index, 0, token);
 
     /** True for the classes ReadIconAsset draws: icon containers and icon bitmaps. */
@@ -70,14 +71,14 @@ public sealed partial class InvestmentCatalog
     }
 
     /**
-     * A container's layers each name a bitmap. No artwork means no icon; another layer whose bitmap is missing or of
-     * another class is left out. An empty watermark slot takes the artwork of the item's watermark container.
+     * A container's layers each name a bitmap. No artwork means no icon; another layer whose bitmap is missing, of
+     * another class or unreadable is left out. An empty watermark slot takes the artwork of the item's watermark container.
      */
     private InvestmentIcon? ReadContainer(uint containerTag, uint watermark, CancellationToken token)
     {
         RequireClass(catalog, containerTag, ContainerClass);
         var container = new TagReader(catalog.Read(containerTag));
-        if (!container.Has(0, 128)) throw new InvalidDataException("Icon container is truncated.");
+        if (!container.Has(0, ContainerLength)) throw new InvalidDataException("Icon container is truncated.");
         uint bitmapTag = container.U32(ArtworkOffset);
         if (bitmapTag is 0 or uint.MaxValue) return null;
         RequireClass(catalog, bitmapTag, BitmapClass);
@@ -90,11 +91,13 @@ public sealed partial class InvestmentCatalog
             token.ThrowIfCancellationRequested();
             uint tag = container.U32(offset);
             if (offset == WatermarkOffset && (tag is 0 or uint.MaxValue) && catalog.TryGetEntry(watermark, out var mark)
-                && mark.Reference == ContainerClass)
-                tag = new TagReader(catalog.Read(watermark)).U32(ArtworkOffset);
+                && mark.Reference == ContainerClass && new TagReader(catalog.Read(watermark)) is var marks
+                && marks.Has(0, ContainerLength))
+                tag = marks.U32(ArtworkOffset);
             if (offset == ArtworkOffset) layers.Add(artwork);
             else if (tag is not (0 or uint.MaxValue) && catalog.TryGetEntry(tag, out var entry) && entry.Reference == BitmapClass)
-                layers.Add(Layer(tag));
+                try { layers.Add(Layer(tag)); }
+                catch (Exception error) when (error is InvalidDataException or NotSupportedException or ArgumentException) { }
         }
         return new(containerTag, bitmapTag, artwork, layers);
     }

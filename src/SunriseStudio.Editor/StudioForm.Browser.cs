@@ -161,7 +161,8 @@ public sealed partial class StudioForm
         // changed asset.
         bool changes = workspace.Project is not null;
         var style = ImGui.GetStyle();
-        float toggle = ImGui.GetFrameHeight() + style.ItemInnerSpacing.X + ImGui.CalcTextSize("Changed only").X + style.ItemSpacing.X;
+        float toggle = ImGui.GetFrameHeight() + style.ItemInnerSpacing.X + ImGui.CalcTextSize("Changed only").X
+            + style.ItemSpacing.X;
         ImGui.SetNextItemWidth(changes ? -toggle : -1);
         if (ImGui.InputTextWithHint("##assetSearch", "Search items, enemies and assets", ref search, 256))
         { browserDirty = true; searchChanged = clock.Elapsed.TotalSeconds; }
@@ -185,7 +186,7 @@ public sealed partial class StudioForm
         else if (OpenCategory is { } list)
         {
             bool gear = GearList(list);
-            DrawTypeFilter(gear ? -ImGui.GetFrameHeight() - ImGui.GetStyle().ItemSpacing.X : -1);
+            DrawTypeFilter(gear ? -TreeExpansion.Width : -1);
             if (gear) DrawGearFilters();
         }
         ImGui.Separator();
@@ -296,6 +297,8 @@ public sealed partial class StudioForm
     private void DrawCategoryHome()
     {
         ImGui.BeginChild("category-home", Vector2.Zero, ImGuiChildFlags.None);
+        // Category game icons read through the investment catalog.
+        workspace.RequestInvestment();
         string? group = null;
         int inCategories = 0;
         foreach (var item in StudioCategories.All)
@@ -313,7 +316,7 @@ public sealed partial class StudioForm
         ImGui.EndChild();
     }
 
-    /** A full-width row: icon, label, and the count on the right. */
+    /** A full-width row: icon, label, and the count on the right. A category's game icon shows once it reads, if it does. */
     private bool CategoryRow(string id, StudioIcon icon, string label, int count, string tooltip)
     {
         ImGui.PushID(id);
@@ -324,7 +327,10 @@ public sealed partial class StudioForm
         var draw = ImGui.GetWindowDrawList();
         float line = ImGui.GetTextLineHeight(), textTop = start.Y + (height - line) / 2;
         uint text = ImGui.GetColorU32(ImGuiCol.Text);
-        ImGuiIcons.Draw(draw, icon, new(start.X + 4 * scale, textTop), line, text);
+        var at = new Vector2(start.X + 4 * scale, textTop);
+        if (!StudioCategories.IconTags.TryGetValue(id, out uint tag) || ItemPreview.Shared?.NoAsset(tag) == true)
+            ImGuiIcons.Draw(draw, icon, at, line, text);
+        else ItemPreview.Shared?.Asset(tag)?.Draw(draw, at, at + new Vector2(line));
         draw.AddText(new(start.X + 12 * scale + line, textTop), text, label);
         string number = count.ToString("N0");
         draw.AddText(new(start.X + width - ImGui.CalcTextSize(number).X - 4 * scale, textTop),

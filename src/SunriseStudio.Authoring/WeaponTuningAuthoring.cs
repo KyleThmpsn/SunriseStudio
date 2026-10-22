@@ -24,6 +24,12 @@ public sealed record PreparedWeaponTuning(uint ConfigTag, int TranslationGroup, 
 public sealed record PreparedWeaponAmmo(IReadOnlyList<ProjectAssetAddition> Assets, IReadOnlyDictionary<uint, byte[]> Changes,
     IReadOnlyDictionary<string, byte[]> AddedChanges);
 
+/**
+ * A weapon's shown Magazine at each raw Magazine stat. Unchecked is true when a perk factor scales the capacity: in-game
+ * readings have confirmed added rounds, not factors.
+ */
+public sealed record WeaponMagazine(InvestmentStatCurve Curve, bool Unchecked);
+
 /** One group a translation config offers: its index, its selector key and a type name installed weapons give it. */
 public sealed record WeaponTuningFamily(int Group, uint Key, string Name);
 
@@ -184,21 +190,24 @@ public static class WeaponTuningAuthoring
         IReadOnlyDictionary<uint, byte[]>? edits = null)
     {
         byte[] Read(uint tag) => edits?.GetValueOrDefault(tag) ?? catalog.Read(tag);
-        if (!InvestmentAmmo.Valid(ammo)) throw new InvalidDataException("Choose Primary, Special or Heavy ammo.");
+        if (!InvestmentAmmoType.Valid(ammo)) throw new InvalidDataException("Choose Primary, Special or Heavy ammo.");
         ItemIconAuthoring.RequireProjectItem(project, catalog, weapon, plannedAssets);
         uint root = WeaponArchetypeAuthoring.Read(catalog, Read(weapon.Tag)).EntityTag;
-        if (Owned(project, root) is null) throw new InvalidDataException("The ammo type needs a project-authored weapon archetype.");
+        if (Owned(project, root) is null)
+            throw new InvalidDataException("The ammo type needs a project-authored weapon archetype.");
         byte[] rootBytes = Read(root);
         var (current, content) = WeaponConfigEdits.WeaponContent(rootBytes);
         byte[] config = WeaponConfigEdits.SetAmmoOverride(Read(current), current, content, ammo);
         var assets = new List<ProjectAssetAddition>();
-        var changes = new Dictionary<uint, byte[]> { [weapon.DisplayTag] = InvestmentAmmo.SetDisplay(Read(weapon.DisplayTag), ammo) };
+        var changes = new Dictionary<uint, byte[]>
+            { [weapon.DisplayTag] = InvestmentAmmoType.SetDisplay(Read(weapon.DisplayTag), ammo) };
         var addedChanges = new Dictionary<string, byte[]>();
         if (Owned(project, current) is { } owned) addedChanges[owned.Id] = config;
         else
         {
             uint tag = FreeEntry(catalog, packageId, firstEntry, plannedAssets, "The weapon content");
-            var entry = catalog.TryGetEntry(current, out var found) ? found : throw new InvalidDataException("The weapon content is missing.");
+            var entry = catalog.TryGetEntry(current, out var found) ? found
+                : throw new InvalidDataException("The weapon content is missing.");
             assets.Add(new(weapon.Name + ".content", WeaponConfigEdits.RetagConfig(config, current, tag).Bytes,
                 new(packageId, entry.Reference, entry.TypeInfo, null, firstEntry), current));
             changes[root] = WeaponConfigEdits.RetagRoot(rootBytes, current, tag);
@@ -216,7 +225,8 @@ public static class WeaponTuningAuthoring
         if (index is >= 0 and <= LastEntry)
         {
             uint tag = 0x80800000u + ((uint)packageId << 13) + (uint)index;
-            if (!catalog.ContainsTag(tag) && plannedAssets?.Any(asset => asset.Native is { } native && NativeTag(native) == tag) != true)
+            if (!catalog.ContainsTag(tag)
+                && plannedAssets?.Any(asset => asset.Native is { } native && NativeTag(native) == tag) != true)
                 return tag;
         }
         throw new InvalidDataException($"{what} needs a free native entry.");
@@ -252,6 +262,54 @@ public static class WeaponTuningAuthoring
             ? curve.Evaluate(stat.Value) : null;
 
     /**
+     * The Magazine the Inspect display shows at each raw Magazine stat from 0 to 100, the weapon's other stats held:
+     * the capacity, Magazine input 0, with its perk modifiers added and then multiplied, over the ammo each shot spends,
+     * rounded down. A weapon whose content counts shots spends its truncated bullets per shot when that is above 0, and
+     * any other spends one. The capacity is translated by the config of the gameplay root that writes one. The modifiers
+     * are those of the default plugs' unconditional perks. Null when no config writes a capacity.
+     * @param stats The weapon's stats with its equipped plugs', by stat index.
+     */
+    public static WeaponMagazine? ReadMagazine(PackageCatalog catalog, InvestmentCatalog investment, InvestmentItem weapon,
+        IReadOnlyDictionary<byte, int> stats)
+    {
+        byte[] definition = catalog.Read(weapon.Tag);
+        var art = WeaponArchetypeAuthoring.Read(catalog, definition);
+        byte[] root = catalog.Read(art.EntityTag);
+        uint key = WeaponArchetypeAuthoring.TypeKey(catalog, art);
+        var (contentTag, content) = WeaponConfigEdits.WeaponContent(root);
+        bool countsShots = WeaponConfigEdits.CountsShotsPerMagazine(catalog.Read(contentTag), contentTag, content,
+            WeaponArchetypeAuthoring.GearKey(catalog, art));
+        var modifiers = DefaultPlugs(investment, catalog, investment.ReadItem(weapon.Tag, definition), catalog.Read)
+            .SelectMany(plug => plug.Perks).Where(perk => !perk.Conditional)
+            .SelectMany(perk => PerkPropertyModifiers.Read(catalog, perk.Index))
+            .Where(modifier => (modifier.Component, modifier.Input) == WeaponTranslationEdits.Capacity).ToArray();
+        float added = modifiers.Where(modifier => !modifier.Multiplies).Sum(modifier => modifier.Amount);
+        float factor = modifiers.Where(modifier => modifier.Multiplies).Aggregate(1f, (product, modifier) => product * modifier.Amount);
+        foreach (uint tag in WeaponConfigEdits.ConstructionConfigs(root).Distinct())
+        {
+            byte[] config = catalog.Read(tag);
+            if (!WeaponTranslationEdits.IsTranslator(config)) continue;
+            int group = WeaponTranslationEdits.SelectGroup(config, key);
+            var overrides = WeaponTranslationEdits.Overrides(config, group);
+            var tables = WeaponTranslationEdits.Tables(config, group);
+            if (Shown(stats.GetValueOrDefault(WeaponTranslationEdits.MagazineStat)) is null) continue;
+            var points = Enumerable.Range(0, CurveEnd + 1).Select(raw => new InvestmentStatPoint(raw, Shown(raw) ?? 0));
+            return new(new(WeaponTranslationEdits.MagazineStat, 0, 0, points), modifiers.Any(modifier => modifier.Multiplies));
+
+            int? Shown(int magazine)
+            {
+                var written = WeaponTranslationEdits.Replay(config, group, tables,
+                    Inputs(new Dictionary<byte, int>(stats) { [WeaponTranslationEdits.MagazineStat] = magazine }, overrides));
+                if (!written.TryGetValue(WeaponTranslationEdits.Capacity, out float capacity)) return null;
+                int perShot = countsShots ? (int)written.GetValueOrDefault(WeaponTranslationEdits.BulletsPerShot) : 0;
+                float shown = (capacity + added) * factor;
+                return (int)MathF.Floor(perShot > 0 ? shown / perShot : shown);
+            }
+        }
+        return null;
+    }
+
+    /**
      * The stat value each translation key reads: a selector override, else the weapon's stat plus the stats of
      * its initial plugs, which is the sum the server sends.
      */
@@ -262,11 +320,18 @@ public static class WeaponTuningAuthoring
         var stats = new Dictionary<byte, int>();
         void Add(IEnumerable<InvestmentStat> rows) { foreach (var row in rows) stats[row.Index] = stats.GetValueOrDefault(row.Index) + row.Value; }
         Add(detail.Stats);
-        foreach (var socket in detail.Sockets.Where(socket => socket.InitialPlug < investment.Items.Count))
-        {
-            var plug = investment.Items[socket.InitialPlug];
-            if (catalog.ContainsTag(plug.Tag)) Add(investment.ReadItem(plug.Tag, read(plug.Tag)).Stats);
-        }
+        foreach (var plug in DefaultPlugs(investment, catalog, detail, read)) Add(plug.Stats);
+        return Inputs(stats, overrides);
+    }
+
+    /** The weapon's installed initial plugs. */
+    private static IEnumerable<InvestmentItemDetail> DefaultPlugs(InvestmentCatalog investment, PackageCatalog catalog,
+        InvestmentItemDetail weapon, Func<uint, byte[]> read) =>
+        weapon.Sockets.Where(socket => socket.InitialPlug < investment.Items.Count).Select(socket => investment.Items[socket.InitialPlug])
+            .Where(plug => catalog.ContainsTag(plug.Tag)).Select(plug => investment.ReadItem(plug.Tag, read(plug.Tag)));
+
+    private static Dictionary<int, float> Inputs(IReadOnlyDictionary<byte, int> stats, IReadOnlyDictionary<int, float> overrides)
+    {
         var inputs = new Dictionary<int, float>();
         for (int key = 0; key < 32; key++)
             if (overrides.TryGetValue(key, out float pinned)) inputs[key] = pinned;

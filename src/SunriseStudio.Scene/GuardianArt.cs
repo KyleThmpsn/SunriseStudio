@@ -84,18 +84,10 @@ public static class GuardianArt
      */
     internal static IReadOnlyList<uint> ItemEntities(GuardianArtTables tables, byte[] itemDefinition, byte classByte, bool female)
     {
-        var item = new TagData(itemDefinition);
-        int art = ArtBlock(item);
-        if (art < 0) return [];
-        int arrangement = -1;
-        foreach (int artRow in item.Rows(art, ItemArtClass, 4))
-        {
-            sbyte rowClass = (sbyte)item.U8(artRow);
-            if (rowClass != -1 && rowClass != classByte) continue;
-            arrangement = item.U16(artRow + 2);
-            break;
-        }
-        if (arrangement < 0) throw new InvalidDataException($"No art row matches class {classByte}.");
+        int arrangement = ItemArrangement(itemDefinition, classByte);
+        if (arrangement < 0)
+            return ArtBlock(new TagData(itemDefinition)) < 0 ? []
+                : throw new InvalidDataException($"No art row matches class {classByte}.");
         int row = tables.Arrangement(arrangement);
         var table = tables.Arrangements;
         var result = new List<uint>();
@@ -105,6 +97,20 @@ public static class GuardianArt
         foreach (var (_, hashes) in Groups(table, row))
             if (hashes.Length != 0 && !IsEmpty(hashes[0])) result.Add(tables.Entity(hashes[0]));
         return result.Distinct().ToArray();
+    }
+
+    /** The art arrangement of the item's first art row whose class byte is -1 or the class byte; -1 when none is. */
+    public static int ItemArrangement(byte[] itemDefinition, byte classByte)
+    {
+        var item = new TagData(itemDefinition);
+        int art = ArtBlock(item);
+        if (art >= 0)
+            foreach (int artRow in item.Rows(art, ItemArtClass, 4))
+            {
+                sbyte rowClass = (sbyte)item.U8(artRow);
+                if (rowClass == -1 || rowClass == classByte) return item.U16(artRow + 2);
+            }
+        return -1;
     }
 
     /** Selector and art hashes of each group of one arrangement row, in row order; a selector may repeat. */

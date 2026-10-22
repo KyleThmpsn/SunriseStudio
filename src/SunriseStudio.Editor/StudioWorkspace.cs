@@ -64,6 +64,8 @@ public sealed record StudioDocument(PackageEntry Entry, string Name, byte[] Byte
     public PreparedGuardian? Guardian { get; init; }
     /** The guardians an armor item can be previewed on; empty for every other document. */
     public IReadOnlyList<ArmorWearer> Wearers { get; init; } = [];
+    /** The art arrangement an item model view draws; -1 for every other document. */
+    public int ArtArrangement { get; init; } = -1;
 }
 
 /** Workers read assets; the window thread adopts results and owns project mutations. */
@@ -232,10 +234,11 @@ public sealed partial class StudioWorkspace : IDisposable
 
     private (uint Tag, AssetOpenContext? Context)? pendingOpen;
 
-    // A weapon view stores the animation owner it found; the request never carries one.
+    // A weapon view stores the animation owner it found, and an item view the part or wearer chosen; the request carries
+    // neither.
     private static bool SameView(AssetOpenContext? open, AssetOpenContext? target) =>
-        open == target
-        || open is { } held && target is { WeaponItemTag: > 0, EntityTag: 0 } && held with { EntityTag = 0 } == target;
+        open == target || open is { } held && target is { EntityTag: 0 } and ({ WeaponItemTag: > 0 } or { ItemModelTag: > 0 })
+            && held with { EntityTag = 0, ArmorFemale = false } == target;
 
     /** An empty context opens an asset plainly, with the flat tab bar and no category viewer. */
     public static readonly AssetOpenContext PlainOpen = new();
@@ -370,8 +373,8 @@ public sealed partial class StudioWorkspace : IDisposable
     {
         if (loadPreview && context is { Guardian: not null })
             return ReadGuardianDocument(catalog, entry, name, context);
-        if (loadPreview && context is { ArmorItemTag: > 0 })
-            return ReadArmorModelDocument(catalog, entry, name, context);
+        if (loadPreview && context is { ItemModelTag: > 0 })
+            return ReadItemModelDocument(catalog, entry, name, context);
         if (loadPreview && context is { WeaponItemTag: > 0 })
             return context.WeaponEffectClipTag != 0
                 ? ReadWeaponEffectDocument(catalog, entry, name, context)

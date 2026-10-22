@@ -49,6 +49,21 @@ public static class WeaponTranslationEdits
     // Each row starts with {i8 key, f32 value} overrides that pin a key's stat.
     private const int SelectorsField = 0x620, SelectorStride = 40, SelectorKey = 16, OverrideStride = 8;
 
+    // A group's routing entries at +0x10 write a component input from operands at +0x10, +0x24 and +0x38 with the
+    // operation byte at +0xC. Its runtime logic rows at +0x20 write their output inputs from the operand rows at +0x10;
+    // type 2 rows take four operands. Both run in one order, the entry's +0x4C and the row's +0x24.
+    private const int RoutesField = 0x10, RouteStride = 0x50, RouteOperation = 0xC, RouteOperands = 0x10, RouteOrder = 0x4C;
+    private const int LogicField = 0x20, LogicStride = 0x28, LogicOperands = 0x10, LogicType = 0x20, LogicOrder = 0x24;
+    private const uint RouteClass = 0x80803981, LogicClass = 0x8080397C, OperandClass = 0x80803986, OutputClass = 0x80803987;
+    private const int LogicOutputStride = 0xC, MagazineLogic = 2, MagazineOperands = 4;
+    // An operand of kind 0 reads translation output +0xC, numbered from 0x1E00 as table * 0x20 + column, or its
+    // constant at +0x10 when that is 0. Another kind reads what an earlier row wrote to component +0, input +4.
+    private const int OperandStride = 0x14, OperandOutput = 0xC, OperandConstant = 0x10;
+    private const uint FirstOutput = 0x1E00;
+    private const int OutputsPerTable = 0x20;
+    /** Component inputs by component selector: Magazine (1) input 0 is capacity, Barrel (2) input 22 bullets per shot. */
+    public static readonly (uint Component, uint Input) Capacity = (1, 0), BulletsPerShot = (2, 22);
+
     // Translation key -> weapon stat; keys 2, 12 and 19 read no stat.
     private static readonly byte?[] KeyStats =
         [14, 24, null, 32, 17, 22, 20, 16, 21, 27, 18, 15, null, 25, 26, 26, 26, 30, 31, null];
@@ -138,6 +153,73 @@ public static class WeaponTranslationEdits
     /** Native magazine size: round half to even of base times rate over the reference rate. */
     public static int Magazine(float magazineBase, float rate, float referenceRate) =>
         (int)Math.Round(magazineBase * rate / referenceRate, MidpointRounding.ToEven);
+
+    /** True when the config has weapon-type groups; a weapon root also constructs configs that are not translators. */
+    public static bool IsTranslator(ReadOnlyMemory<byte> config) =>
+        new TagReader(config).TryArray(GroupsField, GroupClass, GroupStride, out var groups) && groups.Count != 0;
+
+    /**
+     * The component inputs a group writes, by component selector and input: its routing entries and its type 2 logic
+     * rows, the native magazine size times bullets per shot with 0 bullets kept as 1, in their shared order.
+     * Operations 0 to 10 are add, subtract, multiply, divide, copy, ceiling, floor, round half to even, clamp the third
+     * operand, maximum and minimum. Other operations and logic types write nothing.
+     * @param tables The group's tables, read once by the caller.
+     * @param inputs The stat value each translation key reads.
+     */
+    public static IReadOnlyDictionary<(uint Component, uint Input), float> Replay(ReadOnlyMemory<byte> config, int group,
+        IReadOnlyList<WeaponTranslationTable> tables, IReadOnlyDictionary<int, float> inputs)
+    {
+        var reader = new TagReader(config);
+        int at = Group(reader, group);
+        var routes = reader.Array(at + RoutesField, RouteClass, RouteStride);
+        var logic = reader.Array(at + LogicField, LogicClass, LogicStride);
+        var steps = Enumerable.Range(0, routes.Count).Select(index => routes.Data + index * RouteStride)
+            .Select(row => (Order: reader.U32(row + RouteOrder), Logic: false, Row: row))
+            .Concat(Enumerable.Range(0, logic.Count).Select(index => logic.Data + index * LogicStride)
+                .Where(row => reader.I32(row + LogicType) == MagazineLogic)
+                .Select(row => (Order: reader.U32(row + LogicOrder), Logic: true, Row: row)))
+            .OrderBy(step => step.Order);
+        var written = new Dictionary<(uint, uint), float>();
+        foreach (var (_, isLogic, row) in steps)
+        {
+            if (isLogic)
+            {
+                var (count, operands, _) = reader.Array(row + LogicOperands, OperandClass, OperandStride);
+                if (count < MagazineOperands) throw new InvalidDataException("A magazine logic row has fewer than four operands.");
+                var outputs = reader.Array(row, OutputClass, LogicOutputStride);
+                float reference = Operand(operands), rate = Operand(operands + OperandStride);
+                float magazineBase = Operand(operands + 2 * OperandStride), bullets = Operand(operands + 3 * OperandStride);
+                if (reference == 0) throw new InvalidDataException("A magazine logic row has a zero reference rate.");
+                float value = Magazine(magazineBase, rate, reference) * (bullets == 0 ? 1 : bullets);
+                for (int index = 0; index < outputs.Count; index++)
+                    written[Input(outputs.Data + index * LogicOutputStride)] = value;
+                continue;
+            }
+            float a = Operand(row + RouteOperands), b = Operand(row + RouteOperands + OperandStride);
+            float? result = (sbyte)reader.U8(row + RouteOperation) switch
+            {
+                0 => a + b, 1 => a - b, 2 => a * b, 3 => a / b, 4 => a, 5 => MathF.Ceiling(a), 6 => MathF.Floor(a),
+                7 => MathF.Round(a, MidpointRounding.ToEven),
+                8 => MathF.Min(MathF.Max(Operand(row + RouteOperands + 2 * OperandStride), a), b),
+                9 => MathF.Max(a, b), 10 => MathF.Min(a, b), _ => null
+            };
+            if (result is { } routed) written[Input(row)] = routed;
+        }
+        return written;
+
+        (uint, uint) Input(int row) => (reader.U32(row), reader.U32(row + 4));
+        float Operand(int operand)
+        {
+            if (!reader.Has(operand, OperandStride)) throw new InvalidDataException("A translator operand leaves the config.");
+            if (reader.U32(operand) != 0) return written.GetValueOrDefault(Input(operand));
+            uint output = reader.U32(operand + OperandOutput);
+            if (output == 0) return BinaryPrimitives.ReadSingleLittleEndian(config.Span[(operand + OperandConstant)..]);
+            int table = (int)(output - FirstOutput) / OutputsPerTable, column = (int)(output - FirstOutput) % OutputsPerTable;
+            if (output < FirstOutput || table >= tables.Count || column >= tables[table].Columns)
+                throw new InvalidDataException("A translator operand names an output the group does not have.");
+            return tables[table].Evaluate(column, inputs.GetValueOrDefault(tables[table].Key));
+        }
+    }
 
     private static int Group(TagReader reader, int group)
     {

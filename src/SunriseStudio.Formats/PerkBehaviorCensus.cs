@@ -80,8 +80,7 @@ public static class PerkBehaviorCensus
                 if (!nodes.TryGetValue(key, out var row)) nodes[key] = row = (0, []);
                 row.Programs.Add(tag);
                 nodes[key] = (row.Nodes + 1, row.Programs);
-                var found = Sources.Where(source => source.Class == type && node + source.Offset + 4 <= bytes.Length)
-                    .Select(source => (source.Picker, Value: U32(bytes, node + source.Offset)));
+                var found = Values(bytes, node);
                 // Component scale effects hold their names in a u32 array at +8.
                 if (type == ScaleClass && node + 24 <= bytes.Length)
                     found = found.Concat(Rows(bytes, node + 8, 4).Select(row => ("scaled", U32(bytes, row))));
@@ -113,6 +112,19 @@ public static class PerkBehaviorCensus
             LabelTable = labels,
             Values = values
         };
+    }
+
+    /** The object definitions a perk program's nodes name: what it spawns, attaches or waits for. */
+    public static IReadOnlyList<uint> Definitions(byte[] program) =>
+        [.. Walk(program).SelectMany(found => Values(program, found.Node)).Where(found => found.Picker == "definitions")
+            .Select(found => found.Value).Where(tag => tag is not (EmptyHash or uint.MaxValue)).Distinct()];
+
+    /** The picker values a node's payload holds. */
+    private static IEnumerable<(string Picker, uint Value)> Values(byte[] bytes, int node)
+    {
+        uint type = U32(bytes, node - 4);
+        return Sources.Where(source => source.Class == type && node + source.Offset + 4 <= bytes.Length)
+            .Select(source => (source.Picker, U32(bytes, node + source.Offset)));
     }
 
     /** The installed label table; null when the tag is missing or unreadable. */

@@ -19,7 +19,7 @@ public sealed partial class ItemWorkflow
     // The model preview beside the item's text, before scaling.
     private static readonly Vector2 PreviewSize = new(300, 210);
     /** Edited choice lists by socket, written at Create; a socket without one keeps what it offers. */
-    private readonly Dictionary<int, List<ushort>> socketLists = [];
+    private readonly Dictionary<int, List<InvestmentSocketChoice>> socketLists = [];
     private int addingSocket = -1, replacingChoice = -1;
     private bool openAddPlug;
     private int tab;
@@ -34,12 +34,12 @@ public sealed partial class ItemWorkflow
     private string statSearch = "";
     /** The base the open document was last moved to, so the preview shows the item being cloned. */
     private uint? previewBase;
-    private string BasePickerId => $"Choose Base {Noun}###base-item";
-    private const string AddPlugId = "Add Plug###add-plug";
+    private string BasePickerId => $"Choose base {CreationTypes.ItemNoun(category)}###base-item";
+    private const string AddPlugId = "Add plug###add-plug";
     private static readonly CreationChoice[] DummyFilter = [new(1, "Hide Dummies")];
     private (InvestmentItem? Item, ItemStatGroup? Group) statGroup;
     /** What the equipped plugs add to each stat, keyed by the base and its equipped plugs. */
-    private (string Key, Dictionary<byte, List<StatSource>> Plugs) plugStats = ("", []);
+    private (string Key, Dictionary<byte, List<StatSource>> Plugs, ItemMagazine? Magazine) plugStats = ("", [], null);
     private (InvestmentItem? Item, (string Damage, string Ammo) Names) fixedProfile;
     /** Damage type and ammo by weapon tag for the base picker's filters; empty until read. */
     private FrozenDictionary<uint, (int? Damage, int? Ammo)> weaponFacts = FrozenDictionary<uint, (int?, int?)>.Empty;
@@ -59,7 +59,6 @@ public sealed partial class ItemWorkflow
             previewBase = chosen;
             if (workspace.Document?.Entry.TagHash != chosen) workspace.Open(chosen);
         }
-        // Dense rows: one line of text high, close together.
         float scale = CreationWidgets.Scale;
         ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(8, 4) * scale);
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(6, 3) * scale);
@@ -109,8 +108,8 @@ public sealed partial class ItemWorkflow
         ImGui.Separator();
         if (ImGui.BeginTable("##contents", 2, ImGuiTableFlags.SizingStretchProp))
         {
-            ImGui.TableSetupColumn("##stats", ImGuiTableColumnFlags.WidthStretch, .45f);
-            ImGui.TableSetupColumn("##sockets", ImGuiTableColumnFlags.WidthStretch, .55f);
+            ImGui.TableSetupColumn("##stats", ImGuiTableColumnFlags.WidthStretch, .35f);
+            ImGui.TableSetupColumn("##sockets", ImGuiTableColumnFlags.WidthStretch, .65f);
             ImGui.TableNextColumn();
             DrawStatRows();
             ImGui.TableNextColumn();
@@ -190,7 +189,7 @@ public sealed partial class ItemWorkflow
             .OfType<InvestmentItem>().DistinctBy(item => item.Tag).ToArray();
         weaponFactsRead = Task.Run(() => weapons.ToFrozenDictionary(item => item.Tag,
             item => (damageTypes ? InvestmentDamageType.ReadWeapon(investment, packages, item) : null,
-                InvestmentAmmo.Read(packages, item))));
+                InvestmentAmmoType.Read(packages, item))));
     }
 
     /** Name and flavor text, with the type line and lore in a closed Text Presentation. */
@@ -239,7 +238,7 @@ public sealed partial class ItemWorkflow
         var slots = buckets.Count != 0 && buckets.All(choice => choice.Value <= InvestmentItemKinds.LastArmorBucket)
             ? buckets.Select(choice => choice with { Label = InvestmentItemKinds.SlotName((byte)choice.Value) }).ToArray()
             : buckets;
-        ChoiceTile(tiles, "Inventory Slot", bucket, slots);
+        ChoiceTile(tiles, "Inventory Bucket", bucket, slots);
         // Damage and ammo stay in view; a weapon that cannot change them shows what it has.
         if (damageType.Visible) ChoiceTile(tiles, "Damage Type", damageType, DamageTypes);
         else if (weapon)
@@ -277,7 +276,7 @@ public sealed partial class ItemWorkflow
             if (InvestmentDamageType.Installed(investment)
                 && InvestmentDamageType.ReadWeapon(investment, packages, item) is { } value)
                 damage = InvestmentDamageType.Names[value];
-            if (InvestmentAmmo.Read(packages, item) is { } kind) ammo = InvestmentAmmo.Name(kind);
+            if (InvestmentAmmoType.Read(packages, item) is { } kind) ammo = InvestmentAmmoType.Name(kind);
         }
         fixedProfile = (source, (damage, ammo));
         return fixedProfile.Names;
@@ -321,12 +320,15 @@ public sealed partial class ItemWorkflow
         ushort[] equipped = [.. detail.Sockets.Select(SocketDefault)];
         string key = $"{source?.Tag}:{string.Join(",", equipped)}";
         if (plugStats.Key != key && workspace.Catalog is { } catalog)
-            plugStats = (key, ItemStatGroup.PlugStats(investment, catalog,
-                detail.Sockets.Select((socket, i) => (equipped[i], socket.Type))));
+        {
+            var sources = ItemStatGroup.PlugStats(investment, catalog, detail.Sockets.Select((socket, i) => (equipped[i], socket.Type)));
+            plugStats = (key, sources, source is { } weapon
+                ? ItemStatGroup.Magazine(investment, catalog, weapon, ItemStatGroup.Totals(detail.Stats, sources)) : null);
+        }
         var plugs = plugStats.Plugs;
         int Added(byte index) => ItemStatGroup.Sum(plugs.GetValueOrDefault(index), false)
             + ItemStatGroup.Sum(plugs.GetValueOrDefault(index), true);
-        byte[] extra = [.. plugs.Keys.Where(index => Added(index) != 0)
+        byte[] extra = [.. plugs.Keys
             .Concat(category == InvestmentItemKinds.Armor && group is not null ? group.Stats.Keys.Where(group.Bar) : [])
             .Where(index => statDrafts.All(draft => draft.Index != index) && investment.StatName(index) != $"Stat {index}")
             .Distinct().OrderBy(index => group?.Order(index) ?? 0)];
@@ -335,7 +337,7 @@ public sealed partial class ItemWorkflow
         string[] names = [.. statDrafts.Select(draft => investment.StatName(draft.Index))];
         string[] tags = [.. statDrafts.Select(StatTag)];
         float Label(int i) => ImGui.CalcTextSize(names[i]).X
-            + (tags[i].Length == 0 ? 0 : ImGui.CalcTextSize(tags[i]).X * .8f + 14 * scale);
+            + (tags[i].Length == 0 ? 0 : StudioUi.BadgeWidth(tags[i]) + 4 * scale);
         var columns = StudioUi.StatColumns.Here(Enumerable.Range(0, names.Length).Select(Label)
             .Concat(extra.Select(index => ImGui.CalcTextSize(investment.StatName(index)).X)).DefaultIfEmpty(0).Max());
         // In the order the game lists them, then the stats it does not show.
@@ -344,7 +346,6 @@ public sealed partial class ItemWorkflow
         int[] zero = [.. order.Where(i => statDrafts[i].Source >= 0 && detail.Stats[statDrafts[i].Source].Value == 0
             && Added(statDrafts[i].Index) == 0
             && (group is null || group.Position(statDrafts[i].Index) == int.MaxValue))];
-        // Rows close together, one line of text high, as the Investment page draws them.
         void Compact(Action rows)
         {
             ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(gap, 1 * scale));
@@ -359,7 +360,8 @@ public sealed partial class ItemWorkflow
             dropped = order.Except(zero).Any(StatRow);
             if (!dropped) foreach (byte index in extra) PlugRow(index);
             // Armor sums its bars under them, as the game does.
-            if (!dropped && category == InvestmentItemKinds.Armor) StudioUi.StatTotal(columns.Left + columns.Name, columns.Bar, sum);
+            if (!dropped && category == InvestmentItemKinds.Armor)
+                StudioUi.StatTotal(columns.Left + columns.Name, columns.Bar, sum);
         });
         if (!dropped && zero.Length != 0
             && ImGui.TreeNodeEx($"Zero Stats ({zero.Length})###zero-stats", ImGuiTreeNodeFlags.SpanAvailWidth))
@@ -370,18 +372,27 @@ public sealed partial class ItemWorkflow
         if (ImGui.Button("+ Add Stat")) { statSearch = ""; ImGui.OpenPopup("add-stat"); }
         DrawAddStat(investment);
 
+        // A weapon's Magazine reads at every value, one that holds no shot is not shown in game, and its note joins the
+        // value's breakdown.
+        InvestmentStatCurve? Curve(byte index) => ItemStatGroup.Curve(detail, index, plugStats.Magazine);
+        string Note(byte index) => index == WeaponTranslationEdits.MagazineStat ? plugStats.Magazine?.Note ?? "" : "";
+        bool NoShot(byte index, int own, IReadOnlyList<StatSource>? sources, InvestmentStatCurve? curve) =>
+            index == WeaponTranslationEdits.MagazineStat && curve is not null
+            && curve.Evaluate(own + ItemStatGroup.Sum(sources, false) + ItemStatGroup.Sum(sources, true)) == 0;
+
         // The bar and the value the game shows with the equipped plugs.
-        // Plugs other than mods join the base value; mods read as the change.
+        // Armor's stat roll and traits join the base value; other plugs read as the change.
         void Reading(byte index, int own, IReadOnlyList<StatSource>? sources, InvestmentStatCurve? curve, bool dim)
         {
-            int Shown(int value) => value != 0 && curve is not null ? curve.Evaluate(value) : value;
+            int Shown(int value) => (value != 0 || index == WeaponTranslationEdits.MagazineStat) && curve is not null
+                ? curve.Evaluate(value) : value;
             int start = own + ItemStatGroup.Sum(sources, false), total = start + ItemStatGroup.Sum(sources, true);
             int shown = Shown(total);
             // The group says which stats the game draws as bars; without one, values up to 100 do.
             bool barred = !dim && (group?.Bar(index) ?? shown is >= 0 and <= 100)
                 && (total > 0 || group?.Bar(index) == true);
             StudioUi.StatReading(columns.Bar, columns.BarWidth, shown, Shown(start), group?.Full ?? 100, barred,
-                ItemStatGroup.Breakdown(own, sources, total, shown), dim);
+                ItemStatGroup.Breakdown(own, sources, total, shown, Note(index)), dim);
             if (barred) sum += shown;
         }
 
@@ -392,8 +403,10 @@ public sealed partial class ItemWorkflow
             string name = investment.StatName(index);
             ImGui.SetCursorPosX(columns.Left + Math.Max(0, columns.Name - ImGui.CalcTextSize(name).X));
             ImGui.AlignTextToFramePadding();
-            ImGui.TextColored(StudioTheme.Muted, name);
-            Reading(index, 0, plugs.GetValueOrDefault(index), detail.DisplayCurves.GetValueOrDefault(index), false);
+            if (NoShot(index, 0, plugs.GetValueOrDefault(index), Curve(index)))
+            { ImGui.TextDisabled(name); StudioUi.Tip("Not shown in game"); }
+            else ImGui.TextColored(StudioTheme.Muted, name);
+            Reading(index, 0, plugs.GetValueOrDefault(index), Curve(index), false);
             ImGui.PopID();
         }
 
@@ -405,13 +418,14 @@ public sealed partial class ItemWorkflow
             ImGui.SetCursorPosX(columns.Left + Math.Max(0, columns.Name - Label(i)));
             if (tags[i].Length != 0) { StudioUi.Badge(tags[i]); ImGui.SameLine(0, 4 * scale); }
             ImGui.AlignTextToFramePadding();
-            bool hidden = group is not null && group.Position(draft.Index) == int.MaxValue;
+            var curve = draft.Source < 0 || !(detail.Stats[draft.Source].Conditional || detail.Stats[draft.Source].Computed)
+                ? Curve(draft.Index) : null;
+            bool hidden = group is not null && group.Position(draft.Index) == int.MaxValue
+                || NoShot(draft.Index, draft.Value, plugs.GetValueOrDefault(draft.Index), curve);
             // Stats the game does not show read dim.
             if (draft.Remove || hidden) ImGui.TextDisabled(names[i]);
             else ImGui.TextColored(StudioTheme.Muted, names[i]);
             if (hidden && !draft.Remove) StudioUi.Tip("Not shown in game");
-            var curve = draft.Source < 0 || !(detail.Stats[draft.Source].Conditional || detail.Stats[draft.Source].Computed)
-                ? detail.DisplayCurves.GetValueOrDefault(draft.Index) : null;
             Reading(draft.Index, draft.Value, draft.Remove ? null : plugs.GetValueOrDefault(draft.Index), curve, draft.Remove);
             ImGui.SameLine();
             ImGui.SetCursorPosX(columns.Raw);
@@ -434,7 +448,7 @@ public sealed partial class ItemWorkflow
 
     /** New for an added row, else what the base row says about its value. */
     private string StatTag(StatDraft draft) => draft.Source < 0 ? "New"
-        : detail!.Stats[draft.Source].Computed ? "Computed" : detail.Stats[draft.Source].Conditional ? "Conditional" : "";
+        : detail!.Stats[draft.Source].Computed ? "Computed" : detail.Stats[draft.Source].Conditional ? StudioUi.ConditionalBadge : "";
 
     /** A searchable stat list, the new row's raw value and Add. */
     private void DrawAddStat(InvestmentCatalog investment)
@@ -528,13 +542,7 @@ public sealed partial class ItemWorkflow
         {
             var draft = perkDrafts[i];
             ImGui.PushID(i);
-            if (StudioUi.RowIconButton("remove", draft.Remove ? StudioIcon.Reset : StudioIcon.Remove,
-                draft.Remove ? "Restore" : "Remove"))
-            {
-                if (draft.Source < 0) { perkDrafts.RemoveAt(i); ImGui.PopID(); break; }
-                draft.Remove = !draft.Remove;
-            }
-            ImGui.SameLine();
+            float right = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - ImGui.GetFrameHeight();
             ItemPreview.Draw(ItemPreview.Shared?.Perk(draft.Index), ImGui.GetFrameHeight());
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
@@ -542,6 +550,16 @@ public sealed partial class ItemWorkflow
             if (draft.Remove) ImGui.TextDisabled(perk); else ImGui.TextUnformatted(perk);
             if (ImGui.IsItemHovered()) AssetTooltip.DrawPerk(draft.Index, perk);
             if (draft.Source < 0) { ImGui.SameLine(); StudioUi.Badge("New"); }
+            else if (detail!.Perks[draft.Source].Conditional)
+            { ImGui.SameLine(); StudioUi.Badge(StudioUi.ConditionalBadge, StudioUi.ConditionalTip); }
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(right);
+            if (StudioUi.RowIconButton("remove", draft.Remove ? StudioIcon.Reset : StudioIcon.Remove,
+                draft.Remove ? "Restore" : "Remove"))
+            {
+                if (draft.Source < 0) { perkDrafts.RemoveAt(i); ImGui.PopID(); break; }
+                draft.Remove = !draft.Remove;
+            }
             ImGui.PopID();
         }
         if (ImGui.Button("+ Add Perk")) ImGui.OpenPopup("add-perk");
@@ -580,16 +598,19 @@ public sealed partial class ItemWorkflow
         SocketTiles.Members(workspace.Investment!, source!.Tag, detailBytes, socket);
 
     /** The socket's choices: its edited list, else what it offers now, its equipped plug first. */
-    private List<ushort> SocketPlugs(InvestmentSocket socket) => socketLists.TryGetValue(socket.Index, out var plugs) ? plugs
+    private List<ushort> SocketPlugs(InvestmentSocket socket) => socketLists.TryGetValue(socket.Index, out var plugs)
+        ? [.. plugs.Select(choice => choice.Plug)]
         : SocketTiles.Offered(Members(socket), socket, SocketDefault(socket));
 
     private ushort SocketDefault(InvestmentSocket socket) =>
         plugDrafts.TryGetValue(socket.Index, out ushort plug) ? plug : socket.InitialPlug;
 
     /** An edit starts the socket's own list from what it offers now. */
-    private List<ushort> EditPlugs(InvestmentSocket socket)
+    private List<InvestmentSocketChoice> EditPlugs(InvestmentSocket socket)
     {
-        if (!socketLists.TryGetValue(socket.Index, out var plugs)) socketLists[socket.Index] = plugs = SocketPlugs(socket);
+        if (!socketLists.TryGetValue(socket.Index, out var plugs))
+            socketLists[socket.Index] = plugs = [.. SocketPlugs(socket).Select(plug =>
+                new InvestmentSocketChoice(plug, FromSocket: socket.Index))];
         return plugs;
     }
 
@@ -611,11 +632,12 @@ public sealed partial class ItemWorkflow
     {
         var source = detail!.Sockets[from.Socket];
         var plugs = EditPlugs(source);
-        int at = plugs.IndexOf(from.Plug);
+        int at = plugs.FindIndex(choice => choice.Plug == from.Plug);
+        var choice = plugs[at];
         plugs.RemoveAt(at);
         if (from.Socket == to.Index && at < before) before--;
         var target = EditPlugs(to);
-        target.Insert(Math.Clamp(before, 0, target.Count), from.Plug);
+        target.Insert(Math.Clamp(before, 0, target.Count), choice);
         KeepDefault(source);
         KeepDefault(to);
     }
@@ -641,10 +663,12 @@ public sealed partial class ItemWorkflow
         if (openAddPlug) { ImGui.OpenPopup(AddPlugId); openAddPlug = false; }
         if (addingSocket < 0 || detail is null || addingSocket >= detail.Sockets.Count) return;
         var socket = detail.Sockets[addingSocket];
-        if (SocketTiles.Pick(workspace, investment, AddPlugId, socket.Type, SocketPlugs(socket)) is not { } plug) return;
+        if (source is not { } owner || PlugPicker.Pick(workspace, investment, AddPlugId, owner, socket,
+                SocketTiles.Name(workspace, investment, socket), SocketPlugs(socket), replacingChoice) is not { } plug) return;
         var plugs = EditPlugs(socket);
-        if (replacingChoice >= 0 && replacingChoice < plugs.Count) plugs[replacingChoice] = plug;
-        else plugs.Add(plug);
+        var choice = new InvestmentSocketChoice(plug, FromSocket: socket.Index);
+        if (replacingChoice >= 0 && replacingChoice < plugs.Count) plugs[replacingChoice] = choice;
+        else plugs.Add(choice);
         KeepDefault(socket);
     }
 

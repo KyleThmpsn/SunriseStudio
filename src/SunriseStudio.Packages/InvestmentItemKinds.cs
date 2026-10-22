@@ -61,7 +61,8 @@ public static class InvestmentItemKinds
      * Basic and Common gear can lack sockets for real. A few copies match their real item and are not caught.
      */
     public static bool IsDummy(in InvestmentItemFacts facts) => facts.Bucket <= LastArmorBucket
-        && (!facts.HasQuality || (facts.Bucket <= LastWeaponBucket && !facts.HasWeaponType) || (facts.Tier > 2 && !facts.HasSockets));
+        && (!facts.HasQuality || (facts.Bucket <= LastWeaponBucket && !facts.HasWeaponType)
+            || (facts.Tier > 2 && !facts.HasSockets));
 
     public static bool IsCurrency(byte bucket, string typeLine) => bucket is >= 21 and <= 25 || typeLine == "Currency";
 

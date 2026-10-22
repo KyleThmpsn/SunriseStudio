@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using SunriseStudio.Packages;
 
 namespace SunriseStudio.Formats;
 

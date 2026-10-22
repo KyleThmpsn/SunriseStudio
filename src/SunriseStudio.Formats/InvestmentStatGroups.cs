@@ -25,15 +25,25 @@ public static class InvestmentStatGroups
         return Enumerable.Range(0, groups.Count).Select(index => reader.U32(groups.Data + index * GroupStride)).ToArray();
     }
 
+    /** Whether the display declares how its stats show. Gear, Ghosts, vehicles and emblems do; plugs do not. */
+    public static bool HasStatBlock(ReadOnlyMemory<byte> display) => StatBlock(display) >= 0;
+
     /** The display's stat group, or null when it has no stat block or no group. */
     public static int? ReadDisplayGroup(ReadOnlyMemory<byte> display)
     {
-        var reader = new TagReader(display);
-        if (!reader.Has(112, 8)) return null;
-        int block = reader.Relative(112);
-        if (block < 4 || !reader.Has(block, 24) || reader.U32(block - 4) != 0x80805CF1) return null;
-        byte group = reader.U8(block + 20);
+        int block = StatBlock(display);
+        if (block < 0) return null;
+        byte group = display.Span[block + 20];
         return group == byte.MaxValue ? null : group;
+    }
+
+    /** Where the display's stat block starts, or -1 when it has none. */
+    private static int StatBlock(ReadOnlyMemory<byte> display)
+    {
+        var reader = new TagReader(display);
+        if (!reader.Has(112, 8)) return -1;
+        int block = reader.Relative(112);
+        return block >= 4 && reader.Has(block, 24) && reader.U32(block - 4) == 0x80805CF1 ? block : -1;
     }
 
     /** The stats a group shows in the game's order, and the value a full bar stands for; zero names none. */

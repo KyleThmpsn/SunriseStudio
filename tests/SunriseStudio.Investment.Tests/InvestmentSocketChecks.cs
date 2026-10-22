@@ -27,13 +27,15 @@ internal static class InvestmentSocketChecks
             new(InvestmentCatalog.DisplayClass, 8 << 9, display),
             new(InvestmentCatalog.DisplayClass, 8 << 9, display),
             new(InvestmentCatalog.DisplayClass, 8 << 9, display),
-            new(InvestmentItemArt.ClassId, 8 << 9, InvestmentItemArtChecks.Fixture(4))
+            new(InvestmentItemArt.ClassId, 8 << 9, InvestmentItemArtChecks.Fixture(4)),
+            new(0x80802DFB, 8 << 9, ReusableSet())
         ]);
         using var packages = PackageCatalog.Open(install, cacheOptions: new() { Enabled = false });
         var sources = new InvestmentSources(Items: first, Displays: first + 1, StringBanks: uint.MaxValue,
-            ItemArt: first + 10);
+            ItemArt: first + 10, PlugSets: first + 11);
         var catalog = InvestmentCatalog.Load(packages, sources: sources);
         uint tag = first + 2;
+        ChoiceMoves(catalog, tag);
         var socket = catalog.ReadItem(tag, original).Sockets[0];
         Check(catalog.SocketPlugTemplates(tag, original, socket).SequenceEqual(new ushort[] { 1, 3 }),
             "Embedded plug templates did not preserve item indices.");
@@ -114,6 +116,75 @@ internal static class InvestmentSocketChecks
         Reject(() => ItemAuthoring.PlanClone(packages, project.Name, catalog.FindItem(tag)!, selected,
             display, 0x101, 8191, "Invalid pair", null, sources));
         Console.WriteLine("investment_sockets private_pool=pass conditions=preserved tail_alias=pass stale=reject reopen=pass");
+    }
+
+    /** The same plug in two sockets can carry different unlock conditions and weights. */
+    private static void ChoiceMoves(InvestmentCatalog catalog, uint tag)
+    {
+        byte[] original = new byte[1024];
+        Q(original, 0, original.Length); original[186] = 5;
+        Q(original, 104, 200 - 104); U(original, 196, 0x808077C1);
+        Array(original, 200, 240, 3, 0x808077C4);
+        foreach (var (row, count, header) in new[] { (256, 2, 512), (336, 2, 592), (416, 1, 672) })
+        {
+            S(original, row, 3); S(original, row + 2, row == 336 ? (ushort)2 : (ushort)1);
+            S(original, row + 12, ushort.MaxValue); S(original, row + 32, ushort.MaxValue);
+            Array(original, row + 64, header, count, 0x80802E03);
+        }
+        foreach (var (row, plug, condition, argument) in new[]
+        {
+            (528, 1u, 768, 111u), (560, 2u, 768, 111u), (608, 2u, 816, 222u),
+            (640, 3u, 816, 222u), (688, 1u, 864, 333u)
+        })
+        {
+            U(original, row, plug); U(original, row + 4, 0xDEADBEEF);
+            U(original, row + 24, argument);
+            Array(original, row + 8, condition, 1, 0x80807D31);
+            original[condition + 16] = 11; U(original, condition + 20, argument);
+        }
+        Check(catalog.ReadItem(tag, original).Diagnostics.Count == 0, "The move fixture is invalid.");
+        foreach (int[] order in new[] { new[] { 1, 2 }, new[] { 2, 1 } })
+        {
+            byte[] moved = original;
+            foreach (int socket in order)
+                moved = catalog.SetSocketPlugs(tag, moved, catalog.ReadItem(tag, moved).Sockets[socket],
+                    socket == 1 ? [new(3)] : [new(1), new(2, FromSocket: 1)], socket == 1 ? (ushort)3 : (ushort)1, original);
+            int member = Target(moved, 488) + 16 + 32;
+            Check(Q(moved, member + 8) == 1 && U(moved, Target(moved, member + 16) + 20) == 222
+                && U(moved, member + 24) == 222 && U(moved, member + 4) == 0xDEADBEEF,
+                "A moved choice took another socket's condition or weight.");
+            Check(catalog.ReadItem(tag, moved).Diagnostics.Count == 0, "A move produced an invalid item.");
+        }
+        byte[] added = catalog.SetSocketPlugs(tag, original, catalog.ReadItem(tag, original).Sockets[2],
+            [new(1), new(2)], 1);
+        int plain = Target(added, 488) + 16 + 32;
+        Check(Q(added, plain + 8) == 0 && Q(added, plain + 16) == 0 && U(added, plain + 24) == 333,
+            "A plain add inherited an unrelated socket's condition or weight.");
+        byte[] copied = catalog.SetSocketPlugs(tag, original, catalog.ReadItem(tag, original).Sockets[2],
+            [new(1), new(3, Template: 2, FromSocket: 1)], 1);
+        int copy = Target(copied, 488) + 16 + 32;
+        Check(U(copied, Target(copied, copy + 16) + 20) == 222,
+            "A moved project copy lost its source socket's template condition.");
+        Reject(() => catalog.SetSocketPlugs(tag, original, catalog.ReadItem(tag, original).Sockets[2],
+            [new(1), new(2, FromSocket: 3)], 1));
+
+        byte[] reusable = original.ToArray();
+        S(reusable, 416 + 12, 0);
+        byte[] retained = catalog.SetSocketPlugs(tag, reusable, catalog.ReadItem(tag, reusable).Sockets[2],
+            [new(1), new(2)], 1);
+        int kept = Target(retained, 488) + 16 + 32;
+        Check(Q(retained, kept + 8) == 1 && U(retained, Target(retained, kept + 16) + 20) == 444
+            && U(retained, kept + 24) == 444, "A reusable member lost its condition or weight.");
+        Console.WriteLine("socket_choices duplicate_conditions=preserved both_orders=pass plain_add=unconditional reusable=preserved");
+    }
+
+    private static byte[] ReusableSet()
+    {
+        byte[] table = new byte[192]; Q(table, 0, table.Length);
+        Array(table, 8, 32, 1, 0x80802DFF); U(table, 48, 1);
+        Array(table, 56, 96, 1, 0x80802E03); U(table, 112, 2); U(table, 136, 444);
+        Array(table, 120, 160, 1, 0x80807D31); table[176] = 11; U(table, 180, 444);
+        return table;
     }
 
     /** A native catalyst choice keeps its four-instruction condition after the pool grows. */

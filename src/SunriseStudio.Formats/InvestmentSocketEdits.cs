@@ -3,10 +3,15 @@ using System.Globalization;
 
 namespace SunriseStudio.Formats;
 
+/** A choice and its member's original socket; null keeps the destination's member or template. */
+public readonly record struct InvestmentSocketChoice(ushort Plug, ushort? Template = null, int? FromSocket = null);
+
 public sealed partial class InvestmentCatalog
 {
     /** Ordinary socket blocks hold 80-byte rows and at most 12 instance lanes. */
     private const uint SocketBlockClass = 0x808077C1;
+    // Written before each 16-aligned array header.
+    private const uint ArrayMarker = 0x80809FBD;
     /** Embedded plug choices carry an item index and an expression array in 32 bytes. */
     private const uint SocketMemberClass = 0x80802E03, SocketExpressionClass = 0x80807D31;
     private const int SocketMemberStride = 32;
@@ -54,7 +59,7 @@ public sealed partial class InvestmentCatalog
         int count = checked(members.Count + 1), header = checked((current.Length + 19) & ~15);
         byte[] output = new byte[checked(header + 16 + count * SocketMemberStride)];
         current.Span.CopyTo(output);
-        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(header - 4), 0x80809FBD);
+        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(header - 4), ArrayMarker);
         BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(header), count);
         current.Span.Slice(members.Data - 8, 8).CopyTo(output.AsSpan(header + 8));
         for (int index = 0; index < count; index++)
@@ -107,7 +112,7 @@ public sealed partial class InvestmentCatalog
         int header = checked((current.Length + 19) & ~15);
         byte[] output = new byte[checked(header + 16 + SocketMemberStride)];
         current.Span.CopyTo(output);
-        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(header - 4), 0x80809FBD);
+        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(header - 4), ArrayMarker);
         BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(header), 1);
         current.Span.Slice(members.Data - 8, 8).CopyTo(output.AsSpan(header + 8));
         int target = header + 16, source = matches[0];
@@ -126,13 +131,16 @@ public sealed partial class InvestmentCatalog
     }
 
     /**
-     * Makes a socket's choices exactly these plugs in this order, with the initial plug among them. A plug the socket
-     * embeds keeps its member and condition, a plug with an embedded template copies that member and its condition,
-     * and any other copies the first member with no condition. The socket stops drawing from its reusable plug set, so
-     * the list is all it comes with. Its randomized pool stays; InvestmentPlugSets.FollowPools adds new choices to it.
+     * Makes a socket's choices exactly these plugs in this order, with the initial plug among them. A plug keeps the
+     * member in its source socket or reusable plug set, weight and condition included; else it copies its embedded
+     * template's member and condition, else the first member with no condition.
+     * The socket stops drawing from its reusable plug set, so the list is all it comes with. Its randomized pool stays;
+     * InvestmentPlugSets.FollowPools adds new choices to it.
+     * @param origin The definition before this batch of socket edits, so a plug moved between sockets finds its member
+     * whichever socket is rewritten first. Edits only append, so its offsets hold in `current`. Empty uses `current`.
      */
     public byte[] SetSocketPlugs(uint tag, ReadOnlyMemory<byte> current, InvestmentSocket socket,
-        IReadOnlyList<(ushort Plug, ushort? Template)> plugs, ushort initial)
+        IReadOnlyList<InvestmentSocketChoice> plugs, ushort initial, ReadOnlyMemory<byte> origin = default)
     {
         if (plugs.Count == 0) throw new InvalidDataException("A socket needs at least one plug.");
         if (plugs.Count > MaximumAuthoredRows) throw new InvalidDataException("This socket has reached the editor's plug limit.");
@@ -140,30 +148,81 @@ public sealed partial class InvestmentCatalog
             throw new InvalidDataException("A plug appears twice in one socket.");
         if (plugs.All(plug => plug.Plug != initial))
             throw new InvalidDataException("The initial plug must be one of the socket's plugs.");
-        foreach (var (plug, _) in plugs) RequireSocketPlugIndex(plug);
+        foreach (var plug in plugs) RequireSocketPlugIndex(plug.Plug);
         var (reader, row) = ReadSocketForEdit(tag, current, socket);
         var members = ReadSocketMembers(reader, row);
         if (members.Count == 0) throw new InvalidDataException("This socket has no embedded plug choice to copy.");
-        int Member(ushort item) => Enumerable.Range(0, members.Count).Select(index => members.Data + index * SocketMemberStride)
-            .FirstOrDefault(offset => reader.U32(offset) == item, -1);
-        int header = checked((current.Length + 19) & ~15);
-        byte[] output = new byte[checked(header + 16 + plugs.Count * SocketMemberStride)];
+        var before = origin.IsEmpty ? reader : new TagReader(origin);
+        var rows = before.Array(before.Relative(InvestmentSocketRows.Field), InvestmentSocketRows.RowClass,
+            InvestmentSocketRows.Stride);
+        ReadOnlyMemory<byte> table = catalog.ContainsTag(sources.PlugSets) ? catalog.Read(sources.PlugSets) : default;
+        int Embedded(TagReader socketReader, int socketRow, ushort item)
+        {
+            var list = socketReader.Array(socketRow + InvestmentSocketRows.Members, SocketMemberClass, SocketMemberStride);
+            return Enumerable.Range(0, list.Count).Select(index => list.Data + index * SocketMemberStride)
+                .FirstOrDefault(offset => socketReader.U32(offset) == item, -1);
+        }
+        // Where each plug's member comes from: an offset in `current`, or a plug set member with its conditions.
+        (int At, InvestmentPlugSets.SetMember? Set, bool KeepsCondition) Source(InvestmentSocketChoice choice)
+        {
+            var socketReader = reader;
+            int socketRow = row;
+            if (choice.FromSocket is { } from)
+            {
+                if (from < 0 || from >= rows.Count) throw new InvalidDataException("The plug's source socket no longer exists.");
+                socketReader = before;
+                socketRow = rows.Data + from * InvestmentSocketRows.Stride;
+            }
+            if (Embedded(socketReader, socketRow, choice.Plug) is var at and >= 0) return (at, null, true);
+            ushort set = socketReader.U16(socketRow + InvestmentSocketRows.ReusableSet);
+            if (set != ushort.MaxValue && !table.IsEmpty && InvestmentPlugSets.MemberOf(table, set, choice.Plug) is { } member)
+                return (-1, member, true);
+            int copied = choice.Template is { } item ? Embedded(socketReader, socketRow, item) : -1;
+            var sourceMembers = ReadSocketMembers(socketReader, socketRow);
+            if (sourceMembers.Count == 0) throw new InvalidDataException("The plug's source socket has no member to copy.");
+            return copied >= 0 ? (copied, null, true) : (sourceMembers.Data, null, false);
+        }
+        var picks = plugs.Select(Source).ToArray();
+        int header = checked((current.Length + 19) & ~15), end = checked(header + 16 + plugs.Count * SocketMemberStride);
+        // A plug set member's conditions are copied after the members, each array in a block of its own.
+        int[] blocks = new int[plugs.Count];
+        for (int index = 0; index < picks.Length; index++)
+            if (picks[index].Set is { Conditions: > 0 } member)
+            {
+                blocks[index] = end;
+                end = checked(end + InvestmentItemClone.TypedBlockHeader + 16 + (member.ConditionRows.Length + 15 & ~15));
+            }
+        byte[] output = new byte[end];
         current.Span.CopyTo(output);
-        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(header - 4), 0x80809FBD);
+        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(header - 4), ArrayMarker);
         BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(header), plugs.Count);
         current.Span.Slice(members.Data - 8, 8).CopyTo(output.AsSpan(header + 8));
         for (int index = 0; index < plugs.Count; index++)
         {
-            var (plug, template) = plugs[index];
-            int own = Member(plug), copied = template is { } item ? Member(item) : -1;
-            int from = own >= 0 ? own : copied >= 0 ? copied : members.Data, to = header + 16 + index * SocketMemberStride;
-            current.Span.Slice(from, SocketMemberStride).CopyTo(output.AsSpan(to));
-            int expression = reader.Relative(from + 16);
-            if (expression >= 0)
-                BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(to + 16), expression - to - 16L);
-            BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(to), plug);
-            // A plug with no member of its own or a template's carries no condition.
-            if (own < 0 && copied < 0) output.AsSpan(to + 8, 16).Clear();
+            var (from, set, keepsCondition) = picks[index];
+            int to = header + 16 + index * SocketMemberStride;
+            if (set is not null)
+            {
+                set.Row.CopyTo(output.AsSpan(to));
+                output.AsSpan(to + 16, 8).Clear();
+                if (set.Conditions != 0)
+                {
+                    InvestmentItemClone.TypedBlock(set.Conditions, set.ConditionClass, set.ConditionRows)
+                        .CopyTo(output.AsSpan(blocks[index]));
+                    BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(to + 16),
+                        blocks[index] + InvestmentItemClone.TypedBlockHeader - to - 16L);
+                }
+            }
+            else
+            {
+                current.Span.Slice(from, SocketMemberStride).CopyTo(output.AsSpan(to));
+                int expression = reader.Relative(from + 16);
+                if (expression >= 0)
+                    BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(to + 16), expression - to - 16L);
+                // The first member lends its weight only.
+                if (!keepsCondition) output.AsSpan(to + 8, 16).Clear();
+            }
+            BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(to), plugs[index].Plug);
         }
         BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + InvestmentSocketRows.InitialPlug), initial);
         BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(row + InvestmentSocketRows.ReusableSet), ushort.MaxValue);

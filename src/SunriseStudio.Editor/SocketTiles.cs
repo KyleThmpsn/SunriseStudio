@@ -35,8 +35,9 @@ public static class SocketTiles
     private const int ChoiceColumns = 3;
     private const string Payload = "socket-plug";
     private static (int Socket, ushort Plug)? dragged;
-    private static PackageCatalog? source;
+    private static (PackageCatalog? Catalog, long Revision) source;
     private static readonly Dictionary<ushort, uint?> Categories = [];
+    private static readonly Dictionary<ushort, bool> Masterworks = [];
     private static readonly Dictionary<ushort, IReadOnlySet<uint>> Whitelists = [];
     private static readonly Dictionary<ushort, string> CategoryNames = [], TypeLines = [];
     private static readonly ConditionalWeakTable<InvestmentSocket, string> Names = [];
@@ -44,12 +45,14 @@ public static class SocketTiles
     private static FrozenDictionary<uint, uint> rowCategories = FrozenDictionary<uint, uint>.Empty;
     private static Task<FrozenDictionary<uint, uint>>? reading;
 
-    /** What was read belongs to one catalog; another starts over. */
+    /** What was read belongs to one catalog and project overlay; another, or a project edit, starts over. */
     private static void Follow(StudioWorkspace workspace)
     {
-        if (ReferenceEquals(source, workspace.Catalog)) return;
-        source = workspace.Catalog;
-        Categories.Clear(); Whitelists.Clear(); CategoryNames.Clear(); TypeLines.Clear();
+        var current = (workspace.Catalog, workspace.Catalog?.OverlayRevision ?? -1);
+        if (ReferenceEquals(source.Catalog, current.Catalog) && source.Revision == current.Item2) return;
+        source = current;
+        Categories.Clear(); Masterworks.Clear(); Whitelists.Clear(); CategoryNames.Clear(); TypeLines.Clear(); Names.Clear();
+        // A read still running for the old overlay is never adopted.
         rowCategories = FrozenDictionary<uint, uint>.Empty; reading = null;
     }
 
@@ -83,8 +86,8 @@ public static class SocketTiles
 
     /**
      * A socket's name: Masterwork for a masterwork socket type, else the type line most of the plugs its type takes share,
-     * such as Scope, Trait or Shader, else Bungie's name for its socket category, else its position. Until every plug's category has read, the socket's own plugs stand
-     * in for the ones its type takes, and the name is not kept.
+     * such as Scope, Trait or Shader, else Bungie's name for its socket category, else its position. Until every plug's
+     * category has read, the socket's own plugs stand in for the ones its type takes, and the name is not kept.
      */
     public static string Name(StudioWorkspace workspace, InvestmentCatalog investment, InvestmentSocket socket)
     {
@@ -103,8 +106,11 @@ public static class SocketTiles
 
     private static bool MasterworkType(StudioWorkspace workspace, ushort type)
     {
-        try { return InvestmentSocketTypes.Masterwork(workspace.Catalog!.Read(InvestmentSocketTypes.GameplayTable), type); }
-        catch (Exception error) when (error is InvalidDataException or KeyNotFoundException) { return false; }
+        Follow(workspace);
+        if (Masterworks.TryGetValue(type, out bool masterwork)) return masterwork;
+        try { masterwork = InvestmentSocketTypes.Masterwork(workspace.Catalog!.Read(InvestmentSocketTypes.GameplayTable), type); }
+        catch (Exception error) when (error is InvalidDataException or KeyNotFoundException) { masterwork = false; }
+        return Masterworks[type] = masterwork;
     }
 
     /** The type line most of these plugs share; null when none has one. */
@@ -114,7 +120,7 @@ public static class SocketTiles
         .Select(group => group.Key).FirstOrDefault();
 
     /** Every plug item whose category the socket type's whitelist names. */
-    private static IEnumerable<ushort> Takers(StudioWorkspace workspace, InvestmentCatalog investment, ushort type)
+    internal static IEnumerable<ushort> Takers(StudioWorkspace workspace, InvestmentCatalog investment, ushort type)
     {
         var whitelist = Whitelist(workspace, type);
         return rowCategories.Where(pair => whitelist.Contains(pair.Value))
@@ -146,7 +152,7 @@ public static class SocketTiles
     {
         if (!ReferenceEquals(members.Bytes, bytes)) members = (bytes, []);
         if (members.Rows.TryGetValue(socket.Index, out var plugs)) return plugs;
-        try { plugs = investment.SocketPlugTemplates(tag, bytes, socket); }
+        try { plugs = [.. investment.SocketPlugTemplates(tag, bytes, socket).Where(plug => plug < investment.Items.Count)]; }
         catch (Exception error) when (error is InvalidDataException or OverflowException) { plugs = []; }
         return members.Rows[socket.Index] = plugs;
     }
@@ -165,10 +171,10 @@ public static class SocketTiles
 
     /**
      * What the item comes with: the equipped plug, its embedded members in their stored order, then its reusable plug
-     * set. The randomized set's pool is not among them.
+     * set. The randomized set's pool is not among them. A socket that starts empty stores ushort.MaxValue, which is no plug.
      */
     public static List<ushort> Offered(IReadOnlyList<ushort> members, InvestmentSocket socket, ushort equipped) =>
-        [.. members.Prepend(equipped).Concat(socket.ReusablePlugs).Distinct()];
+        [.. members.Prepend(equipped).Where(plug => plug != ushort.MaxValue).Concat(socket.ReusablePlugs).Distinct()];
 
     /** True when the socket embeds a choice to copy and offers few enough choices to arrange. */
     public static bool Arrangeable(IReadOnlyList<ushort> members, InvestmentSocket socket) =>
@@ -200,19 +206,24 @@ public static class SocketTiles
      * @param accepts Whether this socket takes a dragged plug, from another socket or its own.
      * @param restorable Offers Restore Socket in a choice's menu.
      * @param openable Offers Open Plug in a choice's menu.
-     * @param pool Draws the randomized set's pool, read only and in roll order.
+     * @param note Text on the name's line, over the choices, such as a pool's plug set.
+     * @param pool Draws a randomized pool in roll order, which has no default choice.
      * @return What the row asks for, once.
      */
     public static unsafe SocketAction? Row(InvestmentCatalog investment, InvestmentSocket socket, string name,
         IReadOnlyList<ushort> plugs, float label, bool editable, Func<(int Socket, ushort Plug), bool> accepts, bool restorable,
-        bool openable, bool pool = false)
+        bool openable, bool pool = false, string note = "")
     {
-        editable &= !pool;
         var style = ImGui.GetStyle();
         float scale = CreationWidgets.Scale, frame = ImGui.GetFrameHeight(), gap = style.ItemSpacing.X;
         Label(socket, name, label);
         // The add action keeps a fixed column, so every row's choices line up.
         float add = ImGui.CalcTextSize("+ Add Choice").X + style.FramePadding.X * 2, start = ImGui.GetCursorPosX();
+        if (note.Length != 0)
+        {
+            ImGui.TextDisabled(note);
+            ImGui.SetCursorPosX(start);
+        }
         float area = ImGui.GetContentRegionAvail().X - add - gap;
         int columns = Math.Clamp((int)(area / (ChoiceWidth * scale)), 1, Math.Min(ChoiceColumns, Math.Max(1, plugs.Count)));
         float width = MathF.Floor(Math.Max(ChoiceMinimum * scale, (area - gap * (columns - 1)) / columns));
@@ -229,8 +240,9 @@ public static class SocketTiles
             var at = ImGui.GetCursorScreenPos();
             // One continuous tile; its button holds the grip, icon and name and drags, and removal sits at its edge.
             draw.AddRectFilled(at, at + new Vector2(width, frame), ImGui.GetColorU32(ImGuiCol.FrameBg), style.FrameRounding);
-            bool removable = editable && i > 0;
-            float button = width - (removable ? frame : 0), face = pool ? 0 : grip;
+            bool removable = editable && (pool ? plugs.Count > 1 : i > 0);
+            // Only a row that can change draws grips, so a read-only one does not look draggable.
+            float button = width - (removable ? frame : 0), face = editable ? grip : 0;
             ImGui.PushStyleColor(ImGuiCol.Button, Vector4.Zero);
             if (ImGui.Button("##choice", new(button, frame)) && editable) action = new SocketAction.Pick(i);
             ImGui.PopStyleColor();
@@ -242,14 +254,14 @@ public static class SocketTiles
                 ImGui.TextUnformatted(text);
                 ImGui.EndDragDropSource();
             }
-            if (!pool) DrawGrip(draw, at, grip, frame, ImGui.GetColorU32(held ? ImGuiCol.Text : ImGuiCol.TextDisabled));
+            if (editable) DrawGrip(draw, at, grip, frame, ImGui.GetColorU32(held ? ImGuiCol.Text : ImGuiCol.TextDisabled));
             ItemPreview.Label(draw, at + new Vector2(face, 0), button - face, ItemPreview.Shared?.Item(investment.Items[plug]),
                 text);
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 AssetTooltip.DrawPlug(investment.Items[plug]);
             if (ImGui.BeginPopupContextItem("##choice-menu"))
             {
-                if (ImGui.MenuItem("Make Default", "", false, editable && i > 0))
+                if (!pool && ImGui.MenuItem("Make Default", "", false, editable && i > 0))
                     action = new SocketAction.Move(socket.Index, plug, 0);
                 if (ImGui.MenuItem("Remove", "", false, editable && plugs.Count > 1)) action = new SocketAction.Remove(i);
                 if (openable && ImGui.MenuItem("Open Plug")) action = new SocketAction.Open(plug);
@@ -281,14 +293,10 @@ public static class SocketTiles
         var end = ImGui.GetItemRectMax();
         ImGui.SameLine();
         ImGui.SetCursorPosX(start + area + gap);
-        if (pool) ImGui.Dummy(Vector2.Zero);
-        else
-        {
-            ImGui.BeginDisabled(!editable);
-            if (ImGui.Button("+ Add Choice")) action = new SocketAction.Pick(-1);
-            ImGui.EndDisabled();
-            StudioUi.Tip($"Add a plug to {name}");
-        }
+        ImGui.BeginDisabled(!editable);
+        if (ImGui.Button("+ Add Choice")) action = new SocketAction.Pick(-1);
+        ImGui.EndDisabled();
+        StudioUi.Tip($"Add a plug to {name}");
         float bottom = Math.Max(end.Y, ImGui.GetItemRectMax().Y) + style.ItemSpacing.Y;
         ImGui.SetCursorScreenPos(new(ImGui.GetCursorScreenPos().X, bottom));
         ImGui.Dummy(Vector2.Zero);
@@ -315,7 +323,7 @@ public static class SocketTiles
     }
 
     /** Takes the plug categories once their read finishes; empty until then. */
-    private static FrozenDictionary<uint, uint> Adopt()
+    internal static FrozenDictionary<uint, uint> Adopt()
     {
         if (reading is { IsCompleted: true } done)
         {
@@ -346,30 +354,5 @@ public static class SocketTiles
                 catch (Exception error) when (error is InvalidDataException or KeyNotFoundException or OverflowException) { }
             return map.ToFrozenDictionary();
         });
-    }
-
-    /**
-     * The row picker over the plugs a socket's type takes, in a window of its own; ImGui.OpenPopup(id) opens it.
-     * @param present The socket's plugs, which the picker leaves out.
-     * @return The chosen plug's item index, once.
-     */
-    public static ushort? Pick(StudioWorkspace workspace, InvestmentCatalog investment, string id, ushort type,
-        IReadOnlyCollection<ushort> present)
-    {
-        Follow(workspace);
-        var categories = Adopt();
-        var whitelist = Whitelist(workspace, type);
-        var tags = present.Where(plug => plug < investment.Items.Count).Select(plug => investment.Items[plug].Tag).ToHashSet();
-        bool Keep(BrowserAsset row) => investment.FindItem(row.Entry.TagHash) is { DisplayTag: not 0 }
-            && !tags.Contains(row.Entry.TagHash)
-            && categories.TryGetValue(row.Entry.TagHash, out uint category) && whitelist.Contains(category);
-        uint? tag = null;
-        string label = "";
-        if (!CreationWidgets.RowPickerWindow(id, ref tag, ref label, workspace.CategoryRowsOf(InvestmentItemKinds.Mods), Keep,
-                HashCode.Combine(type, categories.Count, tags.Count, workspace.AssetRevision), workspace.IsProjectTag,
-                row => investment.FindItem(row) is { } plug ? ItemPreview.Shared?.Item(plug) : null)
-            || tag is not { } chosen || investment.FindItem(chosen) is not { Index: < InvestmentItemClone.MaximumIndexRows } item)
-            return null;
-        return checked((ushort)item.Index);
     }
 }

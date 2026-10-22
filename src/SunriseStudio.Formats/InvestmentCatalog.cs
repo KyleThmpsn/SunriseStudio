@@ -32,6 +32,8 @@ public sealed record InvestmentSocket(int Index, ushort Type, ushort InitialPlug
     public IReadOnlyList<ushort> ReusablePlugs { get; init; } = [];
     /** The randomized plug set's members in table order, the pool a roll picks from. */
     public IReadOnlyList<ushort> RandomizedPlugs { get; init; } = [];
+    /** The randomized plug set's row in the plug set table and its hash; -1 and 0 for none. */
+    public (int Index, uint Hash) RandomizedSet { get; init; } = (-1, 0);
 }
 public sealed record InvestmentPerk(ushort Index, string Name, AssetProperty Field, bool Conditional = false);
 public sealed record InvestmentPerkDefinition(int Index, uint Hash, string Name, string Description, ushort IconIndex);
@@ -114,11 +116,8 @@ public sealed partial class InvestmentCatalog
         if (!catalog.TryGetEntry(tag, out var entry) || entry.Reference != expected) return [];
         var data = new TagReader(catalog.Read(tag));
         var rows = data.Array(8, stride: DisplayStride);
-        return [.. Enumerable.Range(0, rows.Count).Select(row =>
-        {
-            int p = rows.Data + row * DisplayStride; ushort bank = data.U16(p + DisplayNameBank);
-            return bank < banks.Length ? strings.Get(banks[bank], data.U32(p + DisplayName))?.Trim() ?? "" : "";
-        })];
+        return [.. Enumerable.Range(0, rows.Count).Select(row => rows.Data + row * DisplayStride)
+            .Select(p => Text(data.U16(p + DisplayNameBank), data.U32(p + DisplayName)))];
     }
     /** Resolves a {bank index, string hash} pair through the bank index. */
     public string Text(uint bank, uint hash) => bank < banks.Length ? strings.Get(banks[bank], hash)?.Trim() ?? "" : "";

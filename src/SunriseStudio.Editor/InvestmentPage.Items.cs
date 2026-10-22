@@ -14,13 +14,19 @@ namespace SunriseStudio.Editor;
  */
 public sealed partial class InvestmentPage
 {
-    private (InvestmentItemDetail? Detail, ItemStatGroup? Group, Dictionary<byte, List<StatSource>> Plugs) statGroup =
-        (null, null, []);
+    private (InvestmentItemDetail? Detail, ItemStatGroup? Group, Dictionary<byte, List<StatSource>> Plugs,
+        ItemMagazine? Magazine) statGroup = (null, null, [], null);
     /** The raw stat value being dragged, by field offset; the project takes it when the drag ends. */
     private (int Offset, int Value)? rawDrag;
     private (InvestmentItemDetail? Detail, string? Damage, string? Ammo) profile;
-    private const string AddPlugId = "Add Plug###item-add-plug";
+    private const string AddPlugId = "Add plug###item-add-plug";
     private (int Socket, int Choice)? addingPlug;
+    // A choice of this sets a dropdown socket's plug from the plugs it allows.
+    private const int AllowedPlug = -2;
+    // Item definition fields the card names: maximum stack +180, inventory bucket +184, tier +186 and instanced +187.
+    private const int StackField = 180, BucketField = 184, TierField = 186, InstancedField = 187;
+    // Narrower than this, stats sit above sockets instead of beside them.
+    private const float SideBySideWidth = 760;
     private bool openAddPlug, randomized;
 
     /** A weapon's damage type and ammo names, read once per detail. */
@@ -34,7 +40,7 @@ public sealed partial class InvestmentPage
             if (InvestmentDamageType.Installed(catalog)
                 && InvestmentDamageType.ReadWeapon(catalog, packages, detail.Item) is { } type)
                 damage = InvestmentDamageType.Names[type];
-            if (InvestmentAmmo.Read(packages, detail.Item) is { } kind) ammo = InvestmentAmmo.Name(kind);
+            if (InvestmentAmmoType.Read(packages, detail.Item) is { } kind) ammo = InvestmentAmmoType.Name(kind);
         }
         profile = (detail, damage, ammo);
         return (damage, ammo);
@@ -45,11 +51,25 @@ public sealed partial class InvestmentPage
         InvestmentItemDetail detail, InvestmentSocket socket) =>
         context.Workspace.Document is { } document ? SocketTiles.Members(catalog, detail.Item.Tag, document.Bytes, socket) : [];
 
-    /** Applies what a socket row asks for as one project edit; a move between sockets writes both. */
+    /**
+     * Applies what a socket row asks for as one project edit; a move between sockets writes both.
+     * @param write Writes the edited lists; the socket's choices unless a pool's writer is given.
+     */
     private void Apply(StudioPageContext context, InvestmentCatalog catalog, InvestmentItemDetail detail, InvestmentSocket socket,
-        List<ushort> plugs, SocketAction? action)
+        List<ushort> plugs, SocketAction? action, Action<IReadOnlyList<(int Socket, IReadOnlyList<ushort> Plugs)>>? write = null)
     {
         var workspace = context.Workspace;
+        // A plug moved into another socket keeps its member from the socket it came from.
+        InvestmentSocketChoice Choice(int list, ushort plug, SocketAction.Move? move) =>
+            move is not null && list != move.FromSocket && plug == move.Plug
+                ? new(plug, FromSocket: move.FromSocket) : new(plug);
+        void Write(IReadOnlyList<(int Socket, IReadOnlyList<ushort> Plugs)> lists, SocketAction.Move? move = null) =>
+            workspace.Run(() =>
+            {
+                if (write is not null) write(lists);
+                else workspace.SetInvestmentSockets([.. lists.Select(list => (list.Socket,
+                    (IReadOnlyList<InvestmentSocketChoice>)[.. list.Plugs.Select(plug => Choice(list.Socket, plug, move))]))]);
+            });
         switch (action)
         {
             case SocketAction.Pick pick:
@@ -59,7 +79,7 @@ public sealed partial class InvestmentPage
             case SocketAction.Remove remove:
                 List<ushort> left = [.. plugs];
                 left.RemoveAt(remove.Choice);
-                workspace.Run(() => workspace.SetInvestmentSockets([(socket.Index, left)]));
+                Write([(socket.Index, left)]);
                 break;
             case SocketAction.Move move when move.FromSocket == socket.Index:
                 List<ushort> moved = [.. plugs];
@@ -67,7 +87,7 @@ public sealed partial class InvestmentPage
                 moved.RemoveAt(at);
                 if (at < before) before--;
                 moved.Insert(Math.Clamp(before, 0, moved.Count), move.Plug);
-                workspace.Run(() => workspace.SetInvestmentSockets([(socket.Index, moved)]));
+                Write([(socket.Index, moved)]);
                 break;
             case SocketAction.Move move:
                 var from = detail.Sockets[move.FromSocket];
@@ -75,7 +95,7 @@ public sealed partial class InvestmentPage
                 source.Remove(move.Plug);
                 List<ushort> target = [.. plugs];
                 target.Insert(Math.Clamp(move.Before, 0, target.Count), move.Plug);
-                workspace.Run(() => workspace.SetInvestmentSockets([(from.Index, source), (socket.Index, target)]));
+                Write([(from.Index, source), (socket.Index, target)], move);
                 break;
             case SocketAction.Open open: workspace.Select(catalog.Items[open.Plug].Tag); break;
         }
@@ -85,27 +105,45 @@ public sealed partial class InvestmentPage
     private void DrawAddPlug(StudioPageContext context, InvestmentCatalog catalog, InvestmentItemDetail detail)
     {
         if (openAddPlug) { ImGui.OpenPopup(AddPlugId); openAddPlug = false; }
+        else if (!ImGui.IsPopupOpen(AddPlugId)) addingPlug = null;
         if (addingPlug is not { } adding || adding.Socket >= detail.Sockets.Count) return;
         var socket = detail.Sockets[adding.Socket];
-        List<ushort> plugs = SocketTiles.Offered(Members(context, catalog, detail, socket), socket, socket.InitialPlug);
-        if (SocketTiles.Pick(context.Workspace, catalog, AddPlugId, socket.Type, plugs) is not { } plug) return;
+        string name = SocketTiles.Name(context.Workspace, catalog, socket);
+        if (adding.Choice == AllowedPlug)
+        {
+            ushort[] current = socket.InitialPlug < catalog.Items.Count ? [socket.InitialPlug] : [];
+            if (PlugPicker.Pick(context.Workspace, catalog, AddPlugId, detail.Item, socket, name, current, current.Length - 1,
+                    socket.AllowedPlugs) is { } allowed)
+                context.Workspace.Run(() => context.Workspace.ApplyInvestmentEdit(socket.PlugField,
+                    allowed.ToString(CultureInfo.InvariantCulture)));
+            return;
+        }
+        // The Randomized view adds to the socket's pool; the other to what the item comes with.
+        List<ushort> plugs = randomized ? [.. socket.RandomizedPlugs]
+            : SocketTiles.Offered(Members(context, catalog, detail, socket), socket, socket.InitialPlug);
+        if (PlugPicker.Pick(context.Workspace, catalog, AddPlugId, detail.Item, socket, name, plugs, adding.Choice)
+            is not { } plug) return;
         if (adding.Choice >= 0 && adding.Choice < plugs.Count) plugs[adding.Choice] = plug;
         else plugs.Add(plug);
-        context.Workspace.Run(() => context.Workspace.SetInvestmentSockets([(socket.Index, plugs)]));
+        context.Workspace.Run(() =>
+        {
+            if (randomized) context.Workspace.SetInvestmentPool(socket.Index, plugs);
+            else context.Workspace.SetInvestmentSockets([(socket.Index, [.. plugs.Select(value => new InvestmentSocketChoice(value))])]);
+        });
     }
 
+    /** Icon, name, fields, stats, sockets and perks of one item; values open the edit popup. */
     private void DrawItem(StudioPageContext context, InvestmentCatalog catalog, InvestmentItemDetail detail)
     {
         var item = detail.Item;
         var workspace = context.Workspace;
         bool weapon = item.Category == InvestmentCategory.Weapons;
-        // Dense rows: one line of text high, close together.
         ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(8, 4) * CreationWidgets.Scale);
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(6, 3) * CreationWidgets.Scale);
-        // The item's card: its icon, name, hash and type, with Display Strings as its action.
+        // The item's card: its icon, name, hash and type, with its display record as its action.
         if (item.DisplayTag != 0 && ItemPreview.Shared is { } preview)
         {
-            if (preview.Card(item, "Display Strings", CreationWidgets.Scale)) workspace.Select(item.DisplayTag);
+            if (preview.Card(item, "Display Properties", CreationWidgets.Scale)) workspace.Select(item.DisplayTag);
         }
         else
         {
@@ -118,30 +156,30 @@ public sealed partial class InvestmentPage
         var pairs = new StudioUi.Pairs();
         var (damage, ammo) = weapon ? Profile(context, catalog, detail) : (null, null);
         // Slot, damage, ammo and rarity first, then the other fields.
-        int[] order = [184, 186, 180, 187];
+        int[] order = [BucketField, TierField, StackField, InstancedField];
         foreach (var field in detail.Fields.OrderBy(field =>
             Array.IndexOf(order, field.Offset) is var at and >= 0 ? at : order.Length))
         {
             // Damage and ammo read from the weapon; Clone and Edit change them.
-            if (weapon && field.Offset == 186)
+            if (weapon && field.Offset == TierField)
             {
                 pairs.Fixed("Damage Type", damage, "Clone or Edit changes it.");
                 pairs.Fixed("Ammo Type", ammo, "Clone or Edit changes it.");
             }
             var (label, value) = field.Offset switch
             {
-                180 => ("Maximum Stack", field.Value),
-                184 => ("Inventory Slot", catalog.BucketName(item.Bucket) is { Length: > 0 } bucket ? bucket : field.Value),
-                186 => ("Rarity", item.Rarity),
-                187 => ("Instanced", field.Value == "0" ? "No" : "Yes"),
+                StackField => ("Maximum Stack", field.Value),
+                BucketField => ("Inventory Bucket", catalog.BucketName(item.Bucket) is { Length: > 0 } bucket ? bucket : field.Value),
+                TierField => ("Rarity", item.Rarity),
+                InstancedField => ("Instanced", field.Value == "0" ? "No" : "Yes"),
                 _ => (field.Name, field.Value)
             };
-            if (pairs.Value(label, value, field.Editable, field.Offset == 184 ? $"Inventory bucket {field.Value}" : ""))
+            if (pairs.Value(label, value, field.Editable, field.Offset == BucketField ? $"Inventory bucket {field.Value}" : ""))
                 BeginEdit(context, field);
         }
         ImGui.Spacing();
         ImGui.Separator();
-        if (ImGui.GetContentRegionAvail().X >= 760 * CreationWidgets.Scale
+        if (ImGui.GetContentRegionAvail().X >= SideBySideWidth * CreationWidgets.Scale
             && ImGui.BeginTable("##item-contents", 2, ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TableSetupColumn("##stats", ImGuiTableColumnFlags.WidthStretch, .45f);
@@ -181,9 +219,12 @@ public sealed partial class InvestmentPage
             InvestmentCategory.Weapons => "Weapon Stats", InvestmentCategory.Armor => "Armor Stats", _ => "Stats"
         }, "Each row reads the value the game shows with the equipped plugs, then the raw value saved to the item.");
         if (!ReferenceEquals(statGroup.Detail, detail) && context.Workspace.Catalog is { } packages)
-            statGroup = (detail, ItemStatGroup.Read(packages, detail.Item),
-                ItemStatGroup.PlugStats(catalog, packages, detail.Sockets.Select(socket => (socket.InitialPlug, socket.Type))));
-        var (_, group, plugs) = statGroup;
+        {
+            var sources = ItemStatGroup.PlugStats(catalog, packages, detail.Sockets.Select(socket => (socket.InitialPlug, socket.Type)));
+            statGroup = (detail, ItemStatGroup.Read(packages, detail.Item), sources,
+                ItemStatGroup.Magazine(catalog, packages, detail.Item, ItemStatGroup.Totals(detail.Stats, sources)));
+        }
+        var (_, group, plugs, _) = statGroup;
         bool armor = detail.Item.Category == InvestmentCategory.Armor;
         var extra = plugs.Keys.Concat(armor && group is not null ? group.Stats.Keys.Where(group.Bar) : [])
             .Where(index => detail.Stats.All(stat => stat.Index != index) && catalog.StatName(index) != $"Stat {index}")
@@ -197,12 +238,12 @@ public sealed partial class InvestmentPage
         var style = ImGui.GetStyle();
         float scale = CreationWidgets.Scale, gap = style.ItemSpacing.X;
         float Label(StatLine line) => ImGui.CalcTextSize(line.Name).X
-            + (line.Tag.Length == 0 ? 0 : ImGui.CalcTextSize(line.Tag).X * .8f + 14 * scale);
+            + (line.Tag.Length == 0 ? 0 : StudioUi.BadgeWidth(line.Tag) + 4 * scale);
         var columns = StudioUi.StatColumns.Here(lines.Select(Label).DefaultIfEmpty(0).Max());
         // Zero rows the game does not show, such as Attack and Power, fold away.
         bool Folded(StatLine line) => line.Total == 0 && (group is null || group.Position(line.Index) == int.MaxValue);
         var zero = lines.Where(Folded).ToArray();
-        // Rows close together, one line of text high; the sum is of the bars they draw.
+        // The sum is of the bars the rows draw.
         void Rows(IEnumerable<StatLine> shown, bool total)
         {
             ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(gap, 1 * scale));
@@ -228,31 +269,38 @@ public sealed partial class InvestmentPage
     {
         public int Base => ItemStatGroup.Sum(Plugs, false);
         public int Total => (Own?.Value ?? 0) + Base + ItemStatGroup.Sum(Plugs, true);
-        public string Tag => Own is { Computed: true } ? "Computed" : Own is { Conditional: true } ? "Conditional" : "";
+        public string Tag => Own is { Computed: true } ? "Computed" : Own is { Conditional: true } ? StudioUi.ConditionalBadge : "";
     }
 
     /** One stat row; returns the bar's value, or zero when the row draws no bar. */
-    private int StatRow(StudioPageContext context, InvestmentItemDetail detail, StatLine line, StudioUi.StatColumns columns, float label)
+    private int StatRow(StudioPageContext context, InvestmentItemDetail detail, StatLine line, StudioUi.StatColumns columns,
+        float label)
     {
         ImGui.PushID(line.Own?.Field.Offset ?? -1 - line.Index);
         ImGui.SetCursorPosX(columns.Left + Math.Max(0, columns.Name - label));
         if (line.Tag.Length != 0) { StudioUi.Badge(line.Tag); ImGui.SameLine(0, 4 * CreationWidgets.Scale); }
         ImGui.AlignTextToFramePadding();
-        // Stats the game does not show read dim.
-        if (statGroup.Group is { } shown && shown.Position(line.Index) == int.MaxValue)
+        bool magazine = line.Index == WeaponTranslationEdits.MagazineStat;
+        // The curve maps raw values to what the game shows; zero and computed or conditional rows stay raw. A weapon's
+        // Magazine is translated at every value.
+        var curve = ItemStatGroup.Curve(detail, line.Index, statGroup.Magazine);
+        int Shown(int raw) => curve is not null
+            && (magazine || raw != 0 && line.Own is not ({ Computed: true } or { Conditional: true }))
+            ? curve.Evaluate(raw) : raw;
+        // A raw value being dragged reads live.
+        int own = line.Own is { } row && rawDrag is { } drag && drag.Offset == row.Field.Offset ? drag.Value
+            : line.Own?.Value ?? 0;
+        int total = line.Total - (line.Own?.Value ?? 0) + own, displayed = Shown(total);
+        // Stats the game does not show read dim, a translated Magazine that holds no shot among them.
+        if (statGroup.Group is { } shown && shown.Position(line.Index) == int.MaxValue
+            || magazine && curve is not null && displayed == 0)
         { ImGui.TextDisabled(line.Name); StudioUi.Tip("Not shown in game"); }
         else ImGui.TextColored(StudioTheme.Muted, line.Name);
-        // The curve maps raw values to what the game shows; zero and computed or conditional rows stay raw.
-        int Shown(int raw) => raw != 0 && line.Own is not ({ Computed: true } or { Conditional: true })
-            && detail.DisplayCurves.TryGetValue(line.Index, out var curve) ? curve.Evaluate(raw) : raw;
-        // A raw value being dragged reads live.
-        int own = line.Own is { } row && rawDrag is { } drag && drag.Offset == row.Field.Offset ? drag.Value : line.Own?.Value ?? 0;
-        int total = line.Total - (line.Own?.Value ?? 0) + own, displayed = Shown(total);
         // The group says which stats the game draws as bars; without one, values up to 100 do.
         var group = statGroup.Group;
         bool bar = (group?.Bar(line.Index) ?? displayed is >= 0 and <= 100) && (total > 0 || group?.Bar(line.Index) == true);
         StudioUi.StatReading(columns.Bar, columns.BarWidth, displayed, Shown(own + line.Base), group?.Full ?? 100, bar,
-            ItemStatGroup.Breakdown(own, line.Plugs, total, displayed));
+            ItemStatGroup.Breakdown(own, line.Plugs, total, displayed, magazine ? statGroup.Magazine?.Note ?? "" : ""));
         if (line.Own is { } stat)
         {
             ImGui.SameLine();
@@ -288,7 +336,8 @@ public sealed partial class InvestmentPage
         SocketTiles.Heading("The first choice starts equipped. Right-click a choice to make it the default.", false,
             detail.Sockets, ref randomized);
         if (detail.Sockets.Count == 0) ImGui.TextDisabled("No sockets");
-        float label = detail.Sockets.Select(socket => ImGui.CalcTextSize(SocketTiles.Name(workspace, catalog, socket)).X).DefaultIfEmpty(0).Max();
+        float label = detail.Sockets.Select(socket => ImGui.CalcTextSize(SocketTiles.Name(workspace, catalog, socket)).X)
+            .DefaultIfEmpty(0).Max();
         foreach (var socket in detail.Sockets)
         {
             ImGui.PushID(socket.Index);
@@ -296,8 +345,11 @@ public sealed partial class InvestmentPage
             if (randomized)
             {
                 if (socket.RandomizedPlugs.Count != 0)
-                    Apply(context, catalog, detail, socket, [], SocketTiles.Row(catalog, socket, name, socket.RandomizedPlugs, label,
-                        false, _ => false, restorable: false, openable: true, pool: true));
+                    Apply(context, catalog, detail, socket, [.. socket.RandomizedPlugs], SocketTiles.Row(catalog, socket, name,
+                        socket.RandomizedPlugs, label, workspace.CanEdit, from => from.Socket == socket.Index, restorable: false,
+                        openable: true, pool: true,
+                        note: $"Plug Set {socket.RandomizedSet.Index} · {socket.RandomizedSet.Hash:X8}"),
+                        lists => workspace.SetInvestmentPool(lists[0].Socket, lists[0].Plugs));
                 ImGui.PopID();
                 continue;
             }
@@ -325,17 +377,21 @@ public sealed partial class InvestmentPage
             SocketTiles.Label(socket, name, label);
             bool open = socket.InitialPlug < catalog.Items.Count;
             float button = ImGui.GetContentRegionAvail().X;
-            // The plug's icon and name sit in the button.
             var at = ImGui.GetCursorScreenPos();
             if (ImGui.Button("##plug", new(button, 0)))
-            { BeginEdit(context, socket.PlugField); plugChoices = socket.AllowedPlugs; }
+            {
+                // An editable socket picks its plug in the plug picker; a read-only one lists what it allows.
+                if (workspace.CanEdit) { addingPlug = (socket.Index, AllowedPlug); openAddPlug = true; }
+                else { BeginEdit(context, socket.PlugField); plugChoices = socket.AllowedPlugs; }
+            }
             ItemPreview.Label(ImGui.GetWindowDrawList(), at, button,
                 open ? ItemPreview.Shared?.Item(catalog.Items[socket.InitialPlug]) : null, socket.PlugName);
             if (!open) StudioUi.Tip(name);
             else if (ImGui.IsItemHovered()) AssetTooltip.DrawPlug(catalog.Items[socket.InitialPlug]);
-            if (open && ImGui.BeginPopupContextItem("##plug-menu"))
+            if (ImGui.BeginPopupContextItem("##plug-menu"))
             {
-                if (ImGui.MenuItem("Open Plug")) workspace.Select(catalog.Items[socket.InitialPlug].Tag);
+                if (open && ImGui.MenuItem("Open Plug")) workspace.Select(catalog.Items[socket.InitialPlug].Tag);
+                if (ImGui.MenuItem("Edit Raw Value")) { BeginEdit(context, socket.PlugField); plugChoices = socket.AllowedPlugs; }
                 ImGui.EndPopup();
             }
             ImGui.PopID();
@@ -343,22 +399,38 @@ public sealed partial class InvestmentPage
         DrawAddPlug(context, catalog, detail);
         if (randomized) return;
         ImGui.Spacing();
-        SocketTiles.SandboxHeading();
+        SocketTiles.SandboxHeading("Click a perk to replace it, right-click to open its behavior.");
+        float frame = ImGui.GetFrameHeight(), gap = ImGui.GetStyle().ItemSpacing.X;
         foreach (var perk in detail.Perks)
         {
             ImGui.PushID(perk.Field.Offset);
+            string perkName = PerkLabel(context, catalog, perk.Index);
+            float right = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - frame;
+            float badge = perk.Conditional ? StudioUi.BadgeWidth(StudioUi.ConditionalBadge) + gap : 0;
+            float width = right - gap - badge - ImGui.GetCursorPosX();
+            var at = ImGui.GetCursorScreenPos();
+            if (ImGui.Button("##perk", new(width, 0)))
+            {
+                if (workspace.CanEdit) BeginReplace(context, perk.Field);
+                else BeginEdit(context, perk.Field);
+            }
+            ItemPreview.Label(ImGui.GetWindowDrawList(), at, width, perkIcons.GetValueOrDefault(perk.Index), perkName);
+            if (ImGui.IsItemHovered()) AssetTooltip.DrawPerk(perk.Index, perkName);
+            if (ImGui.BeginPopupContextItem("##perk-menu"))
+            {
+                if (ImGui.MenuItem("Replace Perk", "", false, workspace.CanEdit)) BeginReplace(context, perk.Field);
+                if (ImGui.MenuItem("Open Behavior"))
+                    workspace.Run(() =>
+                        workspace.Select(InvestmentSandboxPerkAuthoring.Read(workspace.Catalog!, perk.Index).GameplayTag));
+                if (ImGui.MenuItem("Remove", "", false, workspace.CanEdit))
+                    workspace.Run(() => workspace.RemoveInvestmentPerk(perk));
+                ImGui.EndPopup();
+            }
+            if (perk.Conditional) { ImGui.SameLine(); StudioUi.Badge(StudioUi.ConditionalBadge, StudioUi.ConditionalTip); }
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(right);
             if (StudioUi.RowIconButton("remove", StudioIcon.Remove, "Remove perk", workspace.CanEdit))
                 workspace.Run(() => workspace.RemoveInvestmentPerk(perk));
-            ImGui.SameLine();
-            if (perkIcons.TryGetValue(perk.Index, out var perkIcon))
-            {
-                ItemPreview.Draw(perkIcon, ImGui.GetFrameHeight());
-                ImGui.SameLine();
-            }
-            string perkName = PerkLabel(context, catalog, perk.Index);
-            if (ImGui.Button(perkName + "##perk")) BeginEdit(context, perk.Field);
-            if (ImGui.IsItemHovered()) AssetTooltip.DrawPerk(perk.Index, perkName);
-            if (perk.Conditional) { ImGui.SameLine(); StudioUi.Badge("Conditional"); }
             ImGui.PopID();
         }
         ImGui.BeginDisabled(!workspace.CanEdit);

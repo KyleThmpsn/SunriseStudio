@@ -132,6 +132,11 @@ internal static class TableMergeRecipes
                 Owned(120, 4) with { Nestable = true }, Owned(136, 4), Owned(152, 4)]), null, SignedRowLimit)
         ]),
         new(PerkDefinitions, "sandbox perk definitions", [Append("rows", Rows, Plain(8), "perk", SignedRowLimit)]),
+        new(PlugSets, "plug sets",
+        [
+            Append("rows", Rows, new(24, [Owned(8, 32, new(32, [Owned(8, 8)])) with { Nestable = true }]),
+                null, ushort.MaxValue)
+        ]),
         new(PerkDisplays, "sandbox perk displays",
         [
             Append("rows", Rows, new(24, [new(8, MergeFieldKind.RowPointer) { TargetArray = 24 }]), "perk", SignedRowLimit),
@@ -183,6 +188,8 @@ internal static class TableMergeRecipes
                 Rule("lore row", [Pointer(40, 0x808077ED)], 0, 2, LoreText),
                 Rule("socket type", SocketRows, 0, 2, SocketTypes),
                 Rule("initial plug", SocketRows, 2, 2, ItemIndex),
+                Rule("reusable plug set", SocketRows, 12, 2, PlugSets),
+                Rule("randomized plug set", SocketRows, 32, 2, PlugSets),
                 Rule("socket plug", [.. SocketRows, Each(64, 32)], 0, 4, ItemIndex),
                 Rule("sandbox perk", [Pointer(112, 0x808077B9), Each(16, 24)], 0, 2, PerkDefinitions),
                 Rule("gear row", [Pointer(136)], 88, 2, Gear),
