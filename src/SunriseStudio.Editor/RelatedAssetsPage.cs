@@ -49,7 +49,7 @@ public sealed class RelatedAssetsPage : IStudioPage
                 ImGui.PushID(index); ImGui.TableNextRow(); ImGui.TableNextColumn();
                 if (ImGui.Selectable(name, false, ImGuiSelectableFlags.SpanAllColumns))
                     context.Workspace.SelectRelated(row);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{row.Name}\n{row.TagHash:X8}\n{kind}");
+                if (ImGui.IsItemHovered()) AssetTooltip.Draw(row.TagHash, row.Name, kind);
                 ImGui.TableNextColumn();
                 // A role that only repeats the name says nothing; the kind does.
                 ImGui.TextUnformatted(row.IsCandidate ? "Possible reference"

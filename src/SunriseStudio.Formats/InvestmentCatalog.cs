@@ -9,11 +9,12 @@ public sealed record InvestmentSources(uint Items = InvestmentTags.ItemIndex, ui
     uint VendorDisplays = InvestmentTags.VendorDisplayIndex, uint PlugSets = 0x81319349, uint Icons = 0x81A291C2,
     uint Perks = 0x81613D28, uint StatGroups = 0x81613D08, uint Collectibles = 0x81327CDE,
     uint CollectibleDisplays = 0x81327D67, uint PresentationNodes = 0x8131933F, uint PresentationNodeDisplays = 0x81613CF8,
-    uint ItemArt = InvestmentItemArt.TableTag);
+    uint ItemArt = InvestmentItemArt.TableTag, uint PowerCaps = 0x8131933D);
 public sealed record InvestmentItem(int Index, uint Hash, uint Tag, uint DisplayTag, string Name,
     string TypeName, string Description, byte Bucket, byte Tier, int MaximumStack, bool Instanced)
 {
-    public InvestmentCategory Category => Bucket <= 2 ? InvestmentCategory.Weapons : Bucket is >= 3 and <= 7
+    public InvestmentCategory Category => Bucket <= InvestmentItemKinds.LastWeaponBucket ? InvestmentCategory.Weapons
+        : Bucket <= InvestmentItemKinds.LastArmorBucket
         ? InvestmentCategory.Armor : InvestmentItemKinds.IsCurrency(Bucket, TypeName)
             ? InvestmentCategory.Currencies : InvestmentCategory.Items;
     public string Rarity => InvestmentItemKinds.TierName(Tier);

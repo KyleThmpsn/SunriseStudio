@@ -107,6 +107,18 @@ public static class InvestmentItemArt
         return Append(table, items: [table.Span.Slice(row, ItemStride).ToArray()]);
     }
 
+    /** An item's type-one field lists its icon's container, then the season watermark's when it has one. */
+    public static IReadOnlyList<uint> ReadIconContainers(ReadOnlyMemory<byte> table, int itemIndex)
+    {
+        var reader = new TagReader(table);
+        var fields = Fields(reader, ItemOffset(reader, itemIndex));
+        int art = ArtField(reader, fields), first = reader.I32(art), count = reader.U8(art + 5);
+        var handles = reader.Array(HandlesField, HandleClass, 4);
+        if (first < 0 || first > handles.Count - count)
+            throw new InvalidDataException("The item art icon leaves the handle pool.");
+        return [.. Enumerable.Range(first, count).Select(index => reader.U32(handles.Data + index * 4))];
+    }
+
     /** A static item icon is one type-one field containing one container handle. */
     public static uint ReadPrimaryIcon(ReadOnlyMemory<byte> table, int itemIndex)
     {
@@ -211,17 +223,26 @@ public static class InvestmentItemArt
         return (count, fields.Data + first * FieldStride);
     }
 
-    private static int PrimaryField(TagReader reader, (int Count, int Data) fields)
+    /** The item's one type-one field, listing its icon's container and any after it. */
+    private static int ArtField(TagReader reader, (int Count, int Data) fields)
     {
         int result = -1;
         for (int index = 0; index < fields.Count; index++)
         {
             int at = fields.Data + index * FieldStride;
             if (reader.U8(at + 4) != 1) continue;
-            if (result >= 0 || reader.U8(at + 5) != 1)
-                throw new NotSupportedException("Custom item icons need one primary art container.");
+            if (result >= 0 || reader.U8(at + 5) == 0)
+                throw new NotSupportedException("The item needs one primary art field.");
             result = at;
         }
         return result >= 0 ? result : throw new NotSupportedException("The item has no primary art container.");
+    }
+
+    /** Custom icons replace a field with one container; an item with a season watermark lists two. */
+    private static int PrimaryField(TagReader reader, (int Count, int Data) fields)
+    {
+        int field = ArtField(reader, fields);
+        return reader.U8(field + 5) == 1 ? field
+            : throw new NotSupportedException("Custom item icons need one primary art container.");
     }
 }

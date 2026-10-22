@@ -145,7 +145,7 @@ public static class CreationWidgets
                 float width = ImGui.GetContentRegionAvail().X, detailWidth = ImGui.CalcTextSize(detail).X;
                 if (ImGui.Selectable("##row", value == tag, ImGuiSelectableFlags.None, new(0, line)))
                 { value = tag; label = name; changed = true; }
-                StudioUi.Tip($"{name}\n{row.Entry.PackageName}  {tag:X8}");
+                if (ImGui.IsItemHovered()) AssetTooltip.Draw(row);
                 var draw = ImGui.GetWindowDrawList();
                 draw.PushClipRect(start, start + new Vector2(width - detailWidth - 8 * Scale, line), true);
                 draw.AddText(start, ImGui.GetColorU32(ImGuiCol.Text), name);

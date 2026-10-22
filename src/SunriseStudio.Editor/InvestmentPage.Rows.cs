@@ -78,7 +78,8 @@ public sealed partial class InvestmentPage
         {
             ImGui.PushID(choice.Index);
             if (ImGui.Selectable(choice.Name, rowIndex == choice.Index)) rowIndex = choice.Index;
-            if (ImGui.IsItemHovered())
+            if (ImGui.IsItemHovered() && addingPerk) AssetTooltip.DrawPerk(choice.Index, choice.Name);
+            else if (ImGui.IsItemHovered())
                 ImGui.SetTooltip(choice.Description.Length == 0 ? $"{choice.Name}\nIndex {choice.Index}"
                     : $"{choice.Name}\n{choice.Description}\nIndex {choice.Index}");
             ImGui.PopID();

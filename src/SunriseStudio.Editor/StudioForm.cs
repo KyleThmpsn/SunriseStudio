@@ -58,6 +58,8 @@ public sealed partial class StudioForm : Form
     private uint? adoptedMap;
     private StudioDocument? adoptedDocument;
     private bool changesOnly;
+    /** The Weapons and Armor lists leave out the display copies InvestmentItemKinds.IsDummy finds. */
+    private bool hideDummies = true;
     public string? Failure { get; private set; }
     public StudioPageRegistry Pages => pages;
     public StudioWorkspace Workspace => workspace;
@@ -165,6 +167,17 @@ public sealed partial class StudioForm : Form
         foreach (var popout in popouts) popout.Rescale(scale);
     }
 
+    /** Rebuilds the fonts when another game opens, since the asset tooltip is set in that game's own faces. */
+    private void ApplyGameFonts()
+    {
+        string? root = workspace.Catalog?.GameRoot;
+        if (gui is null || gui.GameRoot == root) return;
+        gui.GameRoot = root; gui.GameFontScale = AssetTooltip.Zoom;
+        gui.RebuildFonts(BodyFontPath, 16 * scale);
+        gui.MakeCurrent();
+        missionGraph.CodeFont = gui.MonospaceFont;
+    }
+
     /** The initial picker stays open until the chosen folder resolves to installed packages. */
     protected override void OnShown(EventArgs e)
     {
@@ -187,6 +200,7 @@ public sealed partial class StudioForm : Form
             assetViewport = new AssetViewport(renderer)
                 { UseGameShaders = settings.GameShaders, ShowGameShaderToggle = false, FullDetail = settings.FullDetail };
             viewport.EffectControls = assetViewport.EffectControls = effectControls;
+            ItemPreview.Shared = new ItemPreview(renderer);
             viewport.ObjectName = source => ProjectName(source) ?? sceneTree?.Find(source)?.Name ?? SceneObjectName(source);
             assetViewport.ObjectName = SceneObjectName;
             viewport.ShowCursor = settings.ShowAssetCursor;
@@ -265,10 +279,14 @@ public sealed partial class StudioForm : Form
             assetViewport?.Animation?.Tick(0);
             UpdateLiveInspection();
             foreach (var page in pages.Pages.OfType<InvestmentPage>()) page.PrepareDetail(workspace, renderer);
+            ItemPreview.Shared?.Prepare(workspace.Investment);
             EditorReady = !setup && !workspace.IsBlocking && !browserPreparing && workspace.Catalog is not null
                 && viewport.Animation?.IsLoading != true && assetViewport?.Animation?.IsLoading != true;
             double now = clock.Elapsed.TotalSeconds;
             ApplyPendingDpi();
+            ApplyGameFonts();
+            // After both font rebuilds, so the tooltip never holds a font a rebuild freed.
+            AssetTooltip.Prepare(workspace, gui.GameFonts, scale);
             renderer.Resize(ClientSize.Width, ClientSize.Height);
             guiFrameActive = true;
             shownPage = null;
@@ -882,6 +900,7 @@ public sealed partial class StudioForm : Form
         popouts.Clear();
         livePage.Dispose();
         foreach (var page in pages.Pages.OfType<IDisposable>()) page.Dispose();
+        ItemPreview.Shared?.Dispose(); ItemPreview.Shared = null;
         assetViewport?.Dispose(); viewport?.Dispose(); workspace.Dispose();
         loadingLogo?.Dispose(); toolbarLogo?.Dispose(); gui?.Dispose(); renderer?.Dispose(); studioIcon.Dispose();
         if (!options.Smoke)

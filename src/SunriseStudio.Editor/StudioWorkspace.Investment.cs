@@ -48,6 +48,18 @@ public sealed partial class StudioWorkspace
         }, blocking: false, keepNotice: true);
     }
 
+    private (PackageCatalog? Catalog, long Revision) requestedInvestment;
+
+    /** Starts LoadInvestment while none is current, once per package revision, so a failed read waits for the next. */
+    public void RequestInvestment()
+    {
+        if (Investment is not null || IsBusy || Catalog is not { } packages
+            || ReferenceEquals(requestedInvestment.Catalog, packages) && requestedInvestment.Revision == packages.OverlayRevision)
+            return;
+        requestedInvestment = (packages, packages.OverlayRevision);
+        Run(LoadInvestment);
+    }
+
     private LocalizedStrings? investmentStrings;
     private string investmentStringStamp = "";
     // String container and English data classes; an overlay edit to either can change item text.

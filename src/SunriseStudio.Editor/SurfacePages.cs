@@ -20,6 +20,7 @@ public sealed class MaterialsPage : IPreparedStudioPage
     private uint[] additionalTextures = [];
     private uint selectedMaterial;
     private MeshInstance? previousPart;
+    private readonly TreeExpansion expansion = new();
     public string Id => "sunrise.materials";
     public string Title => "Materials";
     public int TexturePreviewCount => thumbnails.Count;
@@ -59,7 +60,7 @@ public sealed class MaterialsPage : IPreparedStudioPage
         }
         var material = surface.Materials.FirstOrDefault(value => value.TagHash == selectedMaterial) ?? surface.Materials[0];
         selectedMaterial = material.TagHash;
-        ImGui.SetNextItemWidth(-1);
+        ImGui.SetNextItemWidth(-TreeExpansion.Width);
         if (ImGui.BeginCombo("##material", material.Name))
         {
             foreach (var value in surface.Materials)
@@ -70,7 +71,10 @@ public sealed class MaterialsPage : IPreparedStudioPage
             }
             ImGui.EndCombo();
         }
+        ImGui.SameLine();
+        expansion.Button();
         ImGui.BeginChild("material-details");
+        expansion.Begin();
         if (ImGui.SmallButton("Open material")) context.Workspace.Select(material.TagHash);
         string profiles = string.Join("  ", new[] { material.Material.VertexShader, material.Material.PixelShader, material.Material.ComputeShader }
             .Where(shader => shader is not null).Select(shader => $"{StageShort(shader!.Stage.ToString())} {shader.Profile}"));
@@ -112,7 +116,7 @@ public sealed class MaterialsPage : IPreparedStudioPage
             }
             ImGui.EndTable();
         }
-        if (additionalTextures.Length > 0 && ImGui.CollapsingHeader("Additional textures"))
+        if (additionalTextures.Length > 0 && ImGui.CollapsingHeader("Additional textures", expansion.Flags()))
             foreach (uint tag in additionalTextures)
             {
                 ImGui.PushID(unchecked((int)tag));
@@ -130,10 +134,10 @@ public sealed class MaterialsPage : IPreparedStudioPage
             foreach (var stage in new[] { execution.Vertex, execution.Pixel, execution.Compute })
             {
                 if (stage.Shader is null && stage.ConstantTemplate.Length == 0 && stage.TfxConstants.Length == 0) continue;
-                if (!ImGui.CollapsingHeader($"{stage.Stage} constants")) continue;
+                if (!ImGui.CollapsingHeader($"{stage.Stage} constants", expansion.Flags())) continue;
                 ImGui.PushID($"{stage.Stage}");
-                DrawVectors("Material", stage.ConstantTemplate);
-                DrawVectors("Expressions", stage.TfxConstants);
+                DrawVectors("Material", stage.ConstantTemplate, expansion.Flags());
+                DrawVectors("Expressions", stage.TfxConstants, expansion.Flags());
                 ImGui.TextDisabled($"{stage.TfxBytecode.Length:N0} TFX bytes / {stage.Samplers.Count} samplers");
                 for (int i = 0; i < stage.Samplers.Count; i++)
                 {
@@ -147,8 +151,10 @@ public sealed class MaterialsPage : IPreparedStudioPage
             ImGui.TextColored(StudioTheme.Accent, "Constants not read");
             StudioUi.Tip(material.Error);
         }
-        if (surface.Diagnostics.Count > 0 && ImGui.CollapsingHeader($"Load report ({surface.Diagnostics.Count})###Load report"))
+        if (surface.Diagnostics.Count > 0 && ImGui.CollapsingHeader($"Load report ({surface.Diagnostics.Count})###Load report",
+            expansion.Flags()))
             StudioUi.Facts("surface-load-report", surface.Diagnostics);
+        expansion.End();
         ImGui.EndChild();
     }
 
@@ -165,9 +171,9 @@ public sealed class MaterialsPage : IPreparedStudioPage
     }
 
     /** Constants retain their authored vector order. */
-    private static void DrawVectors(string title, Vector4[] values)
+    private static void DrawVectors(string title, Vector4[] values, ImGuiTreeNodeFlags flags)
     {
-        if (values.Length == 0 || !ImGui.TreeNode($"{title} ({values.Length})###{title}")) return;
+        if (values.Length == 0 || !ImGui.TreeNodeEx($"{title} ({values.Length})###{title}", flags)) return;
         for (int i = 0; i < values.Length; i++)
         {
             var value = values[i];
@@ -190,6 +196,7 @@ public sealed class ShadersPage : IStudioPage
     private uint selectedShader;
     private ShaderSurface? previous;
     private string[] lines = [], header = [];
+    private readonly TreeExpansion expansion = new();
     public string Id => "sunrise.shaders";
     public string Title => "Shaders";
     public bool CanOpen(StudioDocument document) => document.Surface?.Shaders.Count > 0;
@@ -199,7 +206,7 @@ public sealed class ShadersPage : IStudioPage
     {
         if (context.Workspace.Document?.Surface is not { Shaders.Count: > 0 } surface) return;
         var selected = surface.Shaders.FirstOrDefault(shader => shader.TagHash == selectedShader) ?? surface.Shaders[0];
-        ImGui.SetNextItemWidth(-1);
+        ImGui.SetNextItemWidth(-TreeExpansion.Width);
         if (ImGui.BeginCombo("##shader", $"{selected.Stage} / {selected.Name}"))
         {
             foreach (var shader in surface.Shaders)
@@ -210,10 +217,13 @@ public sealed class ShadersPage : IStudioPage
             }
             ImGui.EndCombo();
         }
+        ImGui.SameLine();
+        expansion.Button();
         ImGui.TextUnformatted($"{selected.Profile} / {selected.Bytecode.Length:N0} bytes");
         ImGui.SameLine();
         if (ImGui.SmallButton("Open bytecode")) context.Workspace.Select(selected.Shader.BytecodeTag);
-        if (ImGui.CollapsingHeader("Declarations"))
+        expansion.Begin();
+        if (ImGui.CollapsingHeader("Declarations", expansion.Flags()))
             foreach (string declaration in selected.Declarations) ImGui.TextUnformatted(declaration);
         if (!ReferenceEquals(previous, selected))
         {
@@ -224,13 +234,14 @@ public sealed class ShadersPage : IStudioPage
             while (start < all.Length && (all[start].TrimStart().StartsWith("//", StringComparison.Ordinal) || all[start].Trim().Length == 0)) start++;
             header = all[..start]; lines = all[start..];
         }
-        if (header.Length > 0 && ImGui.TreeNode($"Header ({header.Length} lines)###shader-header"))
+        if (header.Length > 0 && ImGui.TreeNodeEx($"Header ({header.Length} lines)###shader-header", expansion.Flags()))
         {
             if (context.MonospaceFont.NativePtr != null) ImGui.PushFont(context.MonospaceFont);
             foreach (string line in header) ImGui.TextUnformatted(line.TrimEnd('\r'));
             if (context.MonospaceFont.NativePtr != null) ImGui.PopFont();
             ImGui.TreePop();
         }
+        expansion.End();
         ImGui.BeginChild("shader-code", Vector2.Zero, ImGuiChildFlags.None, ImGuiWindowFlags.HorizontalScrollbar);
         if (context.MonospaceFont.NativePtr != null) ImGui.PushFont(context.MonospaceFont);
         var clipper = new ImGuiListClipperPtr(ImGuiNative.ImGuiListClipper_ImGuiListClipper());

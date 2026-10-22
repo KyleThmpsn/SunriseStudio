@@ -14,6 +14,12 @@ public static class InvestmentSocketTypes
     private const int WhitelistField = 40, WhitelistStride = 8;
     // Gameplay rows own arrays at these offsets.
     private static readonly int[] RowArrays = [16, 40, 56, 80];
+    /** Root blob slot after the socket types; 4-byte rows of socket category hashes. */
+    public const uint CategoryTable = 0x81319330;
+    // Gameplay row +6 is the socket type's row in the category table.
+    private const int CategoryField = 6, CategoryStride = 4;
+    // The game's armor perks socket category, which holds an armor piece's stat roll and its traits.
+    public const uint ArmorPerksCategory = 0x961B10E4;
 
     public static int Count(ReadOnlyMemory<byte> gameplay) => new TagReader(gameplay).Array(RowsField, stride: GameplayStride).Count;
 
@@ -24,6 +30,23 @@ public static class InvestmentSocketTypes
         if (index < 0 || index >= rows.Count) throw new InvalidDataException("The socket type is outside the table.");
         var list = reader.Array(rows.Data + index * GameplayStride + WhitelistField, stride: WhitelistStride);
         return Enumerable.Range(0, list.Count).Select(row => reader.U32(list.Data + row * WhitelistStride)).ToArray();
+    }
+
+    /** A socket type's row in the socket category table; null when the type is outside its table. */
+    public static int? CategoryIndex(ReadOnlyMemory<byte> gameplay, int index)
+    {
+        var reader = new TagReader(gameplay);
+        var rows = reader.Array(RowsField, stride: GameplayStride);
+        return index < 0 || index >= rows.Count ? null : reader.U16(rows.Data + index * GameplayStride + CategoryField);
+    }
+
+    /** A socket type's socket category hash; null when the type or its category is outside its table. */
+    public static uint? Category(ReadOnlyMemory<byte> gameplay, ReadOnlyMemory<byte> categories, int index)
+    {
+        if (CategoryIndex(gameplay, index) is not { } category) return null;
+        var hashes = new TagReader(categories);
+        var list = hashes.Array(RowsField, stride: CategoryStride);
+        return category < list.Count ? hashes.U32(list.Data + category * CategoryStride) : null;
     }
 
     /** Every plug category any socket type accepts. */

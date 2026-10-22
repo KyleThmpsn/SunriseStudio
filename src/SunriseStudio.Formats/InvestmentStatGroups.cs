@@ -3,12 +3,15 @@ using System.Runtime.InteropServices;
 
 namespace SunriseStudio.Formats;
 
+/** One stat a display group shows; a numeric stat shows its value with no bar. */
+public readonly record struct InvestmentGroupStat(byte Stat, bool Numeric);
+
 /** Display stat groups are shared by many items, so one item's curve change gets its own group. */
 public static class InvestmentStatGroups
 {
     public const uint TableClass = 0x80805CFC;
-    private const int GroupsField = 8, GroupStride = 56, StatsField = 16, SpareField = 32;
-    private const int StatStride = 24, CurveField = 8, PointStride = 8;
+    private const int GroupsField = 8, GroupStride = 56, StatsField = 16, SpareField = 32, MaximumField = 48;
+    private const int StatStride = 24, NumericField = 1, CurveField = 8, PointStride = 8;
     private const uint GroupClass = 0x80805D02, StatClass = 0x80805D06, CurveClass = 0x80807D1A, ArrayMarker = 0x80809FBD;
     // The native group index is a signed byte checked against the table's row count.
     public const int MaximumGroups = 128;
@@ -22,15 +25,38 @@ public static class InvestmentStatGroups
         return Enumerable.Range(0, groups.Count).Select(index => reader.U32(groups.Data + index * GroupStride)).ToArray();
     }
 
+    /** Whether the display declares how its stats show. Gear, Ghosts, vehicles and emblems do; plugs do not. */
+    public static bool HasStatBlock(ReadOnlyMemory<byte> display) => StatBlock(display) >= 0;
+
     /** The display's stat group, or null when it has no stat block or no group. */
     public static int? ReadDisplayGroup(ReadOnlyMemory<byte> display)
     {
-        var reader = new TagReader(display);
-        if (!reader.Has(112, 8)) return null;
-        int block = reader.Relative(112);
-        if (block < 4 || !reader.Has(block, 24) || reader.U32(block - 4) != 0x80805CF1) return null;
-        byte group = reader.U8(block + 20);
+        int block = StatBlock(display);
+        if (block < 0) return null;
+        byte group = display.Span[block + 20];
         return group == byte.MaxValue ? null : group;
+    }
+
+    /** Where the display's stat block starts, or -1 when it has none. */
+    private static int StatBlock(ReadOnlyMemory<byte> display)
+    {
+        var reader = new TagReader(display);
+        if (!reader.Has(112, 8)) return -1;
+        int block = reader.Relative(112);
+        return block >= 4 && reader.Has(block, 24) && reader.U32(block - 4) == 0x80805CF1 ? block : -1;
+    }
+
+    /** The stats a group shows in the game's order, and the value a full bar stands for; zero names none. */
+    public static (int Maximum, IReadOnlyList<InvestmentGroupStat> Stats) ReadGroup(ReadOnlyMemory<byte> table, int group)
+    {
+        var reader = new TagReader(table);
+        var groups = reader.Array(GroupsField, GroupClass, GroupStride);
+        if (group < 0 || group >= groups.Count) throw new InvalidDataException("The stat group is outside the table.");
+        int row = groups.Data + group * GroupStride;
+        var stats = reader.Array(row + StatsField, StatClass, StatStride);
+        return (reader.I32(row + MaximumField), [.. Enumerable.Range(0, stats.Count)
+            .Select(index => stats.Data + index * StatStride)
+            .Select(stat => new InvestmentGroupStat(reader.U8(stat), reader.U8(stat + NumericField) == 1))]);
     }
 
     /** An item display selects its stat group by the byte at `+20` of its stat block. */

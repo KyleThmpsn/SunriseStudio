@@ -328,6 +328,7 @@ public sealed class PropertiesPage : IStudioPage
     private HashSet<AssetNode>? matching;
     private string matchedFilter = "";
     private AssetInspection? matchedInspection;
+    private readonly TreeExpansion expansion = new();
     public string Id => "sunrise.properties";
     public string Title => "Properties";
     public bool CanOpen(StudioDocument document) => true;
@@ -336,16 +337,19 @@ public sealed class PropertiesPage : IStudioPage
     public void Draw(StudioPageContext context)
     {
         if (context.Workspace.Document is not { } document) return;
-        ImGui.SetNextItemWidth(-1);
+        ImGui.SetNextItemWidth(-TreeExpansion.Width);
         ImGui.InputTextWithHint("##propertySearch", "Find property", ref filter, 256);
+        ImGui.SameLine();
+        expansion.Button();
         if (filter != matchedFilter || !ReferenceEquals(document.Inspection, matchedInspection))
         {
             matchedFilter = filter; matchedInspection = document.Inspection;
             matching = filter.Length == 0 ? null : Match(document.Inspection.Sections);
         }
         ImGui.BeginChild("property-tree");
+        expansion.Begin();
         var notes = document.Inspection.Diagnostics;
-        if (notes.Count > 0 && ImGui.TreeNode($"Notes ({notes.Count})###notes"))
+        if (notes.Count > 0 && ImGui.TreeNodeEx($"Notes ({notes.Count})###notes", expansion.Flags()))
         {
             StudioUi.Facts("inspection-notes", notes);
             ImGui.TreePop();
@@ -357,6 +361,7 @@ public sealed class PropertiesPage : IStudioPage
             DrawNode(document.Inspection.Sections[i], context, 0);
             ImGui.PopID();
         }
+        expansion.End();
         ImGui.EndChild();
     }
 
@@ -379,12 +384,11 @@ public sealed class PropertiesPage : IStudioPage
         }
     }
 
-    /** A node's property table, then its children; only top-level nodes start open. */
+    /** A node's property table, then its children; top-level nodes start open, or all as Expand All or Collapse All set. */
     private void DrawNode(AssetNode node, StudioPageContext context, int depth)
     {
         if (matching is not null && !matching.Contains(node)) return;
-        var flags = depth == 0 ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
-        if (!ImGui.TreeNodeEx(node.Name, flags)) return;
+        if (!ImGui.TreeNodeEx(node.Name, expansion.Flags(openByDefault: depth == 0))) return;
         if (node.Properties.Count > 0 && ImGui.BeginTable("properties", 2,
             ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
         {

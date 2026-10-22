@@ -2,10 +2,11 @@ namespace SunriseStudio.Packages;
 
 /**
  * Facts of one investment item: its index row, the definition's bucket +184 and tier +186, the display type
- * line, and whether the objective +48, plug +64 and sack +88 blocks are set.
+ * line, whether the objective +48, plug +64, sack +88 and quality +72 blocks are set, whether it lists a socket
+ * and whether +164 names a weapon type.
  */
 public readonly record struct InvestmentItemFacts(ushort Index, uint Hash, uint DisplayTag, byte Bucket, byte Tier,
-    string TypeLine, bool HasObjectives, bool HasPlug, bool HasSack);
+    string TypeLine, bool HasObjectives, bool HasPlug, bool HasSack, bool HasQuality, bool HasSockets, bool HasWeaponType);
 
 /** The one item-kind rule; the browser and the investment catalog both use it. */
 public static class InvestmentItemKinds
@@ -38,8 +39,8 @@ public static class InvestmentItemKinds
     {
         string line = facts.TypeLine;
         byte bucket = facts.Bucket;
-        if (bucket <= 2) return (Weapons, line.Length != 0 ? line : SlotName(bucket));
-        if (bucket <= 7) return (Armor, SlotName(bucket));
+        if (bucket <= LastWeaponBucket) return (Weapons, line.Length != 0 ? line : SlotName(bucket));
+        if (bucket <= LastArmorBucket) return (Armor, SlotName(bucket));
         if (BucketCategories.TryGetValue(bucket, out string? fixedCategory))
             return line == "Quest Step" ? (Quests, line) : (fixedCategory, line);
         if (IsCurrency(bucket, line)) return (Currencies, line);
@@ -51,6 +52,17 @@ public static class InvestmentItemKinds
         if (facts.HasPlug) return (Mods, line);
         return (Other, line.Length != 0 ? line : $"Bucket {bucket}");
     }
+
+    /** Inventory buckets 0 to 2 hold weapons and 3 to 7 armor. */
+    public const byte LastWeaponBucket = 2, LastArmorBucket = 7;
+
+    /**
+     * Display copies of gear: no quality block, a weapon with no type, or Rare and better gear with no socket.
+     * Basic and Common gear can lack sockets for real. A few copies match their real item and are not caught.
+     */
+    public static bool IsDummy(in InvestmentItemFacts facts) => facts.Bucket <= LastArmorBucket
+        && (!facts.HasQuality || (facts.Bucket <= LastWeaponBucket && !facts.HasWeaponType)
+            || (facts.Tier > 2 && !facts.HasSockets));
 
     public static bool IsCurrency(byte bucket, string typeLine) => bucket is >= 21 and <= 25 || typeLine == "Currency";
 

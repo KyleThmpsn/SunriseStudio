@@ -9,6 +9,9 @@ using MapFlags = Vortice.Direct3D11.MapFlags;
 
 namespace SunriseStudio.Rendering;
 
+/** The game's own faces the asset tooltip is set in, each baked at the size it is drawn. */
+public sealed record GameFonts(ImFontPtr Text, ImFontPtr Type, ImFontPtr Name, ImFontPtr Figure);
+
 /** Render ImGui last because its backend owns the active graphics state. */
 public sealed unsafe class ImGuiController : IDisposable
 {
@@ -28,6 +31,11 @@ public sealed unsafe class ImGuiController : IDisposable
     // Set in a controller that shares another controller's fonts; fonts are read through it.
     private readonly ImGuiController? owner;
     private ImFontPtr monospace, title;
+    private GameFonts? gameFonts;
+    // Game text adds Latin Extended-A and general punctuation, such as dashes and curly quotes, to the default Latin.
+    private static readonly IntPtr TextRanges = Ranges(0x0020, 0x017F, 0x2000, 0x206F);
+    // The symbol face maps the glyphs installed strings embed across this private-use span.
+    private static readonly IntPtr SymbolRanges = Ranges(0xE000, 0xEEFF);
     private ID3D11Buffer? vertices;
     private ID3D11Buffer? indices;
     private int vertexCapacity;
@@ -41,6 +49,12 @@ public sealed unsafe class ImGuiController : IDisposable
     // Read each frame: a font rebuild replaces both.
     public ImFontPtr MonospaceFont => owner?.MonospaceFont ?? monospace;
     public ImFontPtr TitleFont => owner?.TitleFont ?? title;
+    /** Null until a game folder with the faces is set and the fonts are rebuilt. */
+    public GameFonts? GameFonts => owner is null ? gameFonts : owner.GameFonts;
+    /** The game folder whose fonts folder supplies the game fonts; rebuild the fonts after setting it. */
+    public string? GameRoot { get; set; }
+    /** How much larger than the body the game fonts are baked; rebuild the fonts after setting it. */
+    public float GameFontScale { get; set; } = 1;
 
     /** The window and renderer must outlive this controller. */
     public ImGuiController(Dx11Renderer renderer, Control window, string? fontPath = null,
@@ -93,6 +107,42 @@ public sealed unsafe class ImGuiController : IDisposable
         string titlePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "seguisb.ttf");
         string? titleFace = File.Exists(titlePath) ? titlePath : fontPath is not null && File.Exists(fontPath) ? fontPath : null;
         title = titleFace is not null ? fonts.AddFontFromFileTTF(titleFace, fontSize * 1.4f) : fonts.AddFontDefault();
+        gameFonts = GameRoot is null ? null : AddGameFonts(fonts, Path.Combine(GameRoot, "fonts"), fontSize * GameFontScale);
+    }
+
+    /**
+     * The asset tooltip's faces from the game's fonts folder, never bundled: text at this size, the type line at 1.35,
+     * the name at 2.05 and the figure at 2.6 times it. Null when the folder lacks one.
+     */
+    private static GameFonts? AddGameFonts(ImFontAtlasPtr fonts, string folder, float fontSize)
+    {
+        string regular = Path.Combine(folder, "NeueHaasUnicaW1G-Regular.otf");
+        string medium = Path.Combine(folder, "NeueHaasUnicaW1G-Medium.otf");
+        string bold = Path.Combine(folder, "NHaasGroteskDSPro-75Bd.otf");
+        string symbols = Path.Combine(folder, "Destiny_Symbols_PC.otf");
+        if (!File.Exists(regular) || !File.Exists(medium) || !File.Exists(bold)) return null;
+        // Text and the type line take the symbols, merged into the face added before them.
+        ImFontPtr Text(string face, float size, bool marks)
+        {
+            var font = fonts.AddFontFromFileTTF(face, size, default, TextRanges);
+            if (!marks || !File.Exists(symbols)) return font;
+            var merge = ImGuiNative.ImFontConfig_ImFontConfig();
+            merge->MergeMode = 1;
+            fonts.AddFontFromFileTTF(symbols, size, merge, SymbolRanges);
+            ImGuiNative.ImFontConfig_destroy(merge);
+            return font;
+        }
+        return new(Text(regular, fontSize, true), Text(regular, fontSize * 1.35f, true),
+            Text(medium, fontSize * 2.05f, false), fonts.AddFontFromFileTTF(bold, fontSize * 2.6f));
+    }
+
+    /** First and last character pairs the atlas reads whenever it builds, so the list is never freed; zero ends it. */
+    private static IntPtr Ranges(params ushort[] bounds)
+    {
+        var ranges = (ushort*)NativeMemory.Alloc((nuint)bounds.Length + 1, sizeof(ushort));
+        for (int i = 0; i < bounds.Length; i++) ranges[i] = bounds[i];
+        ranges[bounds.Length] = 0;
+        return (IntPtr)ranges;
     }
 
     private void UploadFonts(ImFontAtlasPtr fonts)

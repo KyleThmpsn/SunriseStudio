@@ -9,7 +9,7 @@ public enum StudioIcon
     Back, Forward, Expand, Collapse, Folder, Map, Cube, Pin, Light, Group,
     Play, Pause, Reset, Loop, Import, Export, Build, Plus, Open, Shader, Player, PopOut, PopIn,
     Select, Move, Rotate, Scale,
-    Spark, Warning, Remove, Up, Down, Undo, Redo, Check, Copy, Edit, Pushpin, Backdrop
+    Spark, Warning, Remove, Up, Down, Undo, Redo, Check, Copy, Edit, Pushpin, Backdrop, ExpandAll, CollapseAll
 }
 
 /** Vector icons share the current font scale and need no external font or texture. */
@@ -231,6 +231,16 @@ public static class ImGuiIcons
                 break;
             case StudioIcon.Backdrop:
                 Rect(0, .1f, 1, .9f); draw.AddRectFilled(P(0, .55f), P(1, .9f), color);
+                break;
+            case StudioIcon.ExpandAll:
+            case StudioIcon.CollapseAll:
+                // Two stacked chevrons, down to open every node and up to close them.
+                foreach (float top in (float[])[.15f, .5f])
+                {
+                    float edge = icon == StudioIcon.ExpandAll ? top : top + .3f;
+                    float point = icon == StudioIcon.ExpandAll ? top + .3f : top;
+                    Line(.15f, edge, .5f, point); Line(.5f, point, .85f, edge);
+                }
                 break;
         }
     }
