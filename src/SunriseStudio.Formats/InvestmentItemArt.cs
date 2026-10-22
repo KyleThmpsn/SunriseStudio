@@ -114,6 +114,22 @@ public static class InvestmentItemArt
         return Append(table, items: [span.Slice(row, ItemStride).ToArray()]);
     }
 
+    /** An item's type-one field lists its icon's container, then the season watermark's when it has one. */
+    public static IReadOnlyList<uint> ReadIconContainers(ReadOnlyMemory<byte> table, int itemIndex)
+    {
+        var span = table.Span;
+        ref readonly var field = ref TagView.At<SItemArtField>(span, ArtField(span, Fields(span, ItemOffset(span, itemIndex))));
+        var handles = Pool(span, PoolId.Handles);
+        int first = field.FirstValue, count = field.ValueCount;
+        if (first < 0 || first > handles.Count - count)
+            throw new InvalidDataException("The item art icon leaves the handle pool.");
+        var containers = new uint[count];
+        for (int index = 0; index < count; index++)
+            containers[index] = TagView.At<TagReferenceElement>(span,
+                handles.Data + (first + index) * Unsafe.SizeOf<TagReferenceElement>()).Tag;
+        return containers;
+    }
+
     /** A static item icon is one type-one field containing one container handle. */
     public static uint ReadPrimaryIcon(ReadOnlyMemory<byte> table, int itemIndex)
     {
@@ -219,7 +235,8 @@ public static class InvestmentItemArt
         return (count, fields.Data + first * FieldStride);
     }
 
-    private static int PrimaryField(ReadOnlySpan<byte> table, (int Count, int Data) fields)
+    /** The item's one type-one field, listing its icon's container and any after it. */
+    private static int ArtField(ReadOnlySpan<byte> table, (int Count, int Data) fields)
     {
         int result = -1;
         for (int index = 0; index < fields.Count; index++)
@@ -227,11 +244,19 @@ public static class InvestmentItemArt
             int at = fields.Data + index * FieldStride;
             ref readonly var field = ref TagView.At<SItemArtField>(table, at);
             if (field.FieldType != 1) continue;
-            if (result >= 0 || field.ValueCount != 1)
-                throw new NotSupportedException("Custom item icons need one primary art container.");
+            if (result >= 0 || field.ValueCount == 0)
+                throw new NotSupportedException("The item needs one primary art field.");
             result = at;
         }
         return result >= 0 ? result : throw new NotSupportedException("The item has no primary art container.");
+    }
+
+    /** Custom icons replace a field with one container; an item with a season watermark lists two. */
+    private static int PrimaryField(ReadOnlySpan<byte> table, (int Count, int Data) fields)
+    {
+        int field = ArtField(table, fields);
+        return TagView.At<SItemArtField>(table, field).ValueCount == 1 ? field
+            : throw new NotSupportedException("Custom item icons need one primary art container.");
     }
 
     /** The table root sits at offset 0, so field offsets are absolute. */

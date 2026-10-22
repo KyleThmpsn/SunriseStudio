@@ -33,6 +33,8 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
     private readonly IconGrid grid = new();
     private string search = "";
     private ItemSort sort;
+    // Leaves out the display copies of gear InvestmentItemKinds.IsDummy finds.
+    private bool hideDummies = true;
     private int chosen = -1;
     // What the next draw does to the list's scroll: back to the top for new rows, then to the chosen item when the rows list it.
     private bool scrollToTop, scrollToChosen;
@@ -42,10 +44,11 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
     private InvestmentItem? contextItem;
     // The kind, search, order and narrowing the rows were built for. A change scrolls the list to the chosen item, or to the
     // top when the new rows do not list it.
-    private (string Kind, string Search, ItemSort Sort, IReadOnlyCollection<int>? Candidates, bool ChangedOnly) filter;
-    // The data the rows were built from. A new catalog, category rows or, under ChangedOnly, a project edit rebuilds the rows
-    // without moving the list.
-    private (InvestmentCatalog? Catalog, BrowserAsset[]? KindRows, int ProjectRevision) source;
+    private (string Kind, string Search, ItemSort Sort, IReadOnlyCollection<int>? Candidates, bool ChangedOnly, bool HideDummies)
+        filter;
+    // The data the rows were built from. A new catalog, category rows, new item names while dummies are hidden or, under
+    // ChangedOnly, a project edit rebuilds the rows without moving the list.
+    private (InvestmentCatalog? Catalog, BrowserAsset[]? KindRows, int ProjectRevision, int NameRevision) source;
     private InvestmentItem[] rows = [];
 
     /** A category name from the kind menu, or AllItems. */
@@ -80,8 +83,8 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
     }
 
     /**
-     * Draws the search box, the kind and sort menus and the count on one line. Trailing is the width the caller keeps for its
-     * own controls after them.
+     * Draws the search box, the kind and sort menus, the filter menu and the count on one line. Trailing is the width the caller
+     * keeps for its own controls after them.
      */
     public void DrawBar(StudioWorkspace workspace, InvestmentCatalog catalog, ItemCatalogOptions options, float trailing)
     {
@@ -90,9 +93,9 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
         float menu = MenuFonts * ImGui.GetFontSize();
         int menus = kindMenu ? 2 : 1;
         string count = InvestmentTableViews.Count(rows.Length, "item");
-        float counted = ImGui.CalcTextSize(count).X;
-        ImGui.SetNextItemWidth(Math.Max(menu,
-            ImGui.GetContentRegionAvail().X - menus * menu - counted - trailing - (menus + 1) * style.ItemSpacing.X));
+        float counted = ImGui.CalcTextSize(count).X, filters = ImGui.GetFrameHeight();
+        ImGui.SetNextItemWidth(Math.Max(menu, ImGui.GetContentRegionAvail().X - menus * menu - filters - counted - trailing
+            - (menus + 2) * style.ItemSpacing.X));
         ImGui.InputTextWithHint("##item-search", "Search items", ref search, 256);
         ImGui.SameLine();
         if (kindMenu)
@@ -115,6 +118,14 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
             ImGui.EndCombo();
         }
         StudioUi.Tip("Order");
+        ImGui.SameLine();
+        if (StudioUi.IconButton("item-filters", StudioIcon.Filter, "Filters")) ImGui.OpenPopup("item-filters-menu");
+        if (ImGui.BeginPopup("item-filters-menu"))
+        {
+            ImGui.MenuItem("Hide Dummies", "", ref hideDummies);
+            StudioUi.Tip("Display copies of gear with no quality, weapon type or socket. A few look real and still show.");
+            ImGui.EndPopup();
+        }
         ImGui.SameLine();
         ImGui.TextDisabled(count);
     }
@@ -173,7 +184,7 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
                 if (IconList.Row(icons, scale, item.Index == chosen, catalog, item, true, item.Name, Colour(item), item.TypeName,
                     options.Held?.Badge(item.Hash) ?? "", workspace.IsModified(item.Tag)))
                     clicked = item;
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip(Tip(item, options.Held));
+                if (ImGui.IsItemHovered()) DrawTip(item, options.Held);
                 if (options.Menu is { } menu && ImGui.BeginPopupContextItem("item-context"))
                 {
                     menu(item);
@@ -203,7 +214,7 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
                 item.Index == chosen, workspace.IsModified(item.Tag));
         }
         int clicked = grid.Draw("item-grid", shown.Length, Cell, scale, 0, out int hovered, out int context);
-        if (hovered >= 0) ImGui.SetTooltip(Tip(shown[hovered], options.Held));
+        if (hovered >= 0) DrawTip(shown[hovered], options.Held);
         if (context >= 0 && options.Menu is not null) { contextItem = shown[context]; ImGui.OpenPopup("item-grid-context"); }
         if (options.Menu is { } menu && contextItem is { } open && ImGui.BeginPopup("item-grid-context"))
         {
@@ -231,8 +242,9 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
     internal InvestmentItem[] Rows(StudioWorkspace workspace, InvestmentCatalog catalog, ItemCatalogOptions options)
     {
         var kindRows = Kind == AllItems ? null : workspace.CategoryRows.GetValueOrDefault(Kind) ?? [];
-        var narrowed = (Kind, search, sort, options.Candidates, options.ChangedOnly);
-        var built = (catalog, kindRows, options.ChangedOnly ? workspace.ProjectRevision : 0);
+        var narrowed = (Kind, search, sort, options.Candidates, options.ChangedOnly, hideDummies);
+        var built = (catalog, kindRows, options.ChangedOnly ? workspace.ProjectRevision : 0,
+            hideDummies ? workspace.NameRevision : 0);
         if (filter == narrowed && source == built) return rows;
         if (filter != narrowed) scrollToTop = scrollToChosen = true;
         filter = narrowed; source = built;
@@ -240,6 +252,8 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
             : kindRows.Select(row => catalog.FindItem(row.Entry.TagHash)).OfType<InvestmentItem>();
         if (options.Candidates is { } only) items = items.Where(item => only.Contains(item.Index));
         if (options.ChangedOnly) items = items.Where(item => workspace.IsModified(item.Tag));
+        if (hideDummies && workspace.Names is { } names)
+            items = items.Where(item => !(names.TryGetItem(item.Tag, out var facts) && ItemKinds.IsDummy(facts)));
         string[] words = BrowserRowFilter.Words(search);
         if (words.Length != 0)
             items = items.Where(item => SearchText(item) is var text
@@ -266,6 +280,13 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
     private static string KindLabel(string name) => StudioCategories.Find(name)?.Label ?? name;
 
     private static uint Colour(InvestmentItem item) => ImGui.GetColorU32(StudioTheme.Rarity(item.Tier));
+
+    /** The game's own tooltip for an item, or, where the game's character holds items, the name, type and what is held. */
+    private static void DrawTip(InvestmentItem item, LiveHeldIndex? held)
+    {
+        if (held is null) AssetTooltip.Draw(item.Tag, item.Name, item.TypeName);
+        else ImGui.SetTooltip(Tip(item, held));
+    }
 
     private static string Tip(InvestmentItem item, LiveHeldIndex? held)
     {

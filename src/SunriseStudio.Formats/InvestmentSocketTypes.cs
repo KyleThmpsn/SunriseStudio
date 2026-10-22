@@ -25,6 +25,15 @@ public static class InvestmentSocketTypes
         TagView.FieldOffset<SocketTypeRow>("H321354a2"), TagView.FieldOffset<SocketTypeRow>("HE0b00974")
     ];
     private static readonly int WhitelistField = RowArrays[1];
+    /** Root blob slot after the socket types; 4-byte rows of socket category hashes. */
+    public const uint CategoryTable = 0x81319330;
+    // The registry names neither table's layout: the category table keeps its rows where the gameplay table does, and the
+    // second u16 after a gameplay row's hash is the socket type's row in the category table.
+    private static readonly int CategoryRowsField = GameplayRowsField,
+        CategoryField = TagView.FieldOffset<SocketTypeRow>(nameof(SocketTypeRow.Unk0)) + sizeof(uint) + sizeof(ushort);
+    private const int CategoryStride = sizeof(uint);
+    // The game's armor perks socket category, which holds an armor piece's stat roll and its traits.
+    public const uint ArmorPerksCategory = 0x961B10E4;
 
     public static int Count(ReadOnlyMemory<byte> gameplay) => TagArray.Checked(gameplay.Span, GameplayRowsField, stride: GameplayStride).Count;
 
@@ -37,6 +46,23 @@ public static class InvestmentSocketTypes
         var result = new uint[list.Count];
         for (int row = 0; row < list.Count; row++) result[row] = TagView.At<C80807ac0>(span, list.Data + row * WhitelistStride).Unk0;
         return result;
+    }
+
+    /** A socket type's row in the socket category table; null when the type is outside its table. */
+    public static int? CategoryIndex(ReadOnlyMemory<byte> gameplay, int index)
+    {
+        var span = gameplay.Span;
+        var rows = TagArray.Checked(span, GameplayRowsField, stride: GameplayStride);
+        return index < 0 || index >= rows.Count ? null : TagRead.U16(span, rows.Data + index * GameplayStride + CategoryField);
+    }
+
+    /** A socket type's socket category hash; null when the type or its category is outside its table. */
+    public static uint? Category(ReadOnlyMemory<byte> gameplay, ReadOnlyMemory<byte> categories, int index)
+    {
+        if (CategoryIndex(gameplay, index) is not { } category) return null;
+        var span = categories.Span;
+        var list = TagArray.Checked(span, CategoryRowsField, stride: CategoryStride);
+        return category < list.Count ? TagRead.U32(span, list.Data + category * CategoryStride) : null;
     }
 
     /** Every plug category any socket type accepts. */

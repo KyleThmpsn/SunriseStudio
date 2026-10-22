@@ -169,6 +169,17 @@ public sealed partial class StudioForm : Form
         foreach (var popout in popouts) popout.Rescale(scale);
     }
 
+    /** Rebuilds the fonts when another game opens, since the asset tooltip is set in that game's own faces. */
+    private void ApplyGameFonts()
+    {
+        string? root = workspace.Catalog?.GameRoot;
+        if (gui is null || gui.GameRoot == root) return;
+        gui.GameRoot = root; gui.GameFontScale = AssetTooltip.Zoom;
+        gui.RebuildFonts(BodyFontPath, 16 * scale);
+        gui.MakeCurrent();
+        missionGraph.CodeFont = gui.MonospaceFont;
+    }
+
     /** The initial picker stays open until the chosen folder resolves to installed packages. */
     protected override void OnShown(EventArgs e)
     {
@@ -278,6 +289,9 @@ public sealed partial class StudioForm : Form
                 && viewport.Animation?.IsLoading != true && assetViewport?.Animation?.IsLoading != true;
             double now = clock.Elapsed.TotalSeconds;
             ApplyPendingDpi();
+            ApplyGameFonts();
+            // After both font rebuilds, so the tooltip never holds a font a rebuild freed.
+            AssetTooltip.Prepare(workspace, icons, gui.GameFonts, scale);
             renderer.Resize(ClientSize.Width, ClientSize.Height);
             guiFrameActive = true;
             shownPage = null; shownRowPage = null;

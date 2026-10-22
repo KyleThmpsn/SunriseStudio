@@ -8,7 +8,7 @@ internal static class ItemCategoryChecks
     internal static void Synthetic()
     {
         static InvestmentItemFacts Item(byte bucket, string line = "", bool objectives = false, bool plug = false) =>
-            new(0, 1, 2, bucket, 5, line, objectives, plug, false);
+            new(0, 1, 2, bucket, 5, line, objectives, plug, false, false, false, false);
         (InvestmentItemFacts Facts, string Category, string Type)[] cases =
         [
             (Item(0, "Auto Rifle"), "Weapons", "Auto Rifle"), (Item(2), "Weapons", "Power"),

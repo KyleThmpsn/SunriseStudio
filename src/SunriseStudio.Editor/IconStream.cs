@@ -28,6 +28,9 @@ internal sealed class IconStream<TImage, TTexture> : IDisposable where TImage : 
     /** True once the worker has nothing left to read. */
     public bool Idle => reader?.Idle ?? true;
 
+    /** True once the item was read and has no icon, while it is kept. */
+    public bool Missing(int item) => textures.TryGetValue(item, out var entry) && entry.Texture is null;
+
     /** @return The item's texture once it is made. Until then it returns null and queues the item after those drawn before it. */
     public TTexture? Get(int item)
     {

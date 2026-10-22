@@ -141,16 +141,35 @@ public sealed partial class StudioNameIndex
         }
     }
 
-    /** The objective, plug and sack blocks are set when their pointers are not null. */
+    /**
+     * The objective, plug, sack and quality blocks are set when their pointers are not null. An item lists a socket when
+     * its socket array has a row, and names a weapon type when the identifier is not FNV-1 of an empty name.
+     */
     private static InvestmentItemFacts ItemFacts(byte[] item, ushort index, uint hash, uint displayTag, string line)
     {
         if (!TagView.FitsThrough<ItemDefinition>(item, 0, $"{ItemInventory}.{nameof(C808077f5.Instanced)}"))
             throw new InvalidDataException("Item fixed fields are truncated.");
+        uint weaponType = TagView.Member<ItemDefinition, uint>(item, 0, nameof(ItemDefinition.WeaponTypeIdentifier));
         return new(index, hash, displayTag,
             TagView.Member<ItemDefinition, byte>(item, 0, $"{ItemInventory}.{nameof(C808077f5.InventoryBucket)}"),
             TagView.Member<ItemDefinition, byte>(item, 0, $"{ItemInventory}.{nameof(C808077f5.Tier)}"), line,
             IsSet(item, nameof(ItemDefinition.ObjectiveItemBlock)), IsSet(item, nameof(ItemDefinition.PlugItemBlock)),
-            IsSet(item, nameof(ItemDefinition.SackItemBlock)));
+            IsSet(item, nameof(ItemDefinition.SackItemBlock)), IsSet(item, nameof(ItemDefinition.QualityItemBlock)),
+            HasSockets(item), weaponType is not (0 or EmptyNameHash));
+    }
+
+    // FNV-1 of an empty name, the weapon type of every item that is not a weapon.
+    private const uint EmptyNameHash = 0x811C9DC5;
+
+    /** True when the item's socket block lists at least one socket. */
+    private static bool HasSockets(byte[] item)
+    {
+        ref readonly var sockets = ref TagView.Member<ItemDefinition, RelativePointer<SItemSocketBlock>>(item, 0,
+            nameof(ItemDefinition.SocketsItemBlock));
+        return TagView.TargetOffset(item, in sockets) is { } block
+            && TagView.FitsThrough<SItemSocketBlock>(item, block, nameof(SItemSocketBlock.Sockets))
+            && TagView.Member<SItemSocketBlock, TagArray<ItemOrdinarySocketEntry>>(item, block,
+                nameof(SItemSocketBlock.Sockets)).Count != 0;
     }
 
     /** True when the item definition's block pointer `member` is not null. */
@@ -158,7 +177,7 @@ public sealed partial class StudioNameIndex
         !TagView.Member<ItemDefinition, RelativePointer<Unknown>>(item, 0, member).IsNull;
 
     private static InvestmentItemFacts UnreadItem(ushort index, uint hash, uint displayTag, string line) =>
-        new(index, hash, displayTag, UnreadByte, UnreadByte, line, false, false, false);
+        new(index, hash, displayTag, UnreadByte, UnreadByte, line, false, false, false, false, false, false);
 
     /**
      * Rereads one item's facts from its definition and display.

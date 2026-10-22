@@ -60,7 +60,7 @@ public static class StudioBrand
     }
 
     /** Box filter weighted by alpha, so transparent texels do not darken the edges. */
-    private static byte[] HalveRgba(byte[] source, int width, int height)
+    internal static byte[] HalveRgba(byte[] source, int width, int height)
     {
         int w = Math.Max(1, width / 2), h = Math.Max(1, height / 2);
         var result = new byte[w * h * 4];

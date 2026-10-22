@@ -9,7 +9,7 @@ public enum StudioIcon
     Back, Forward, Expand, Collapse, Folder, Map, Cube, Pin, Light, Group,
     Play, Pause, Reset, Loop, Import, Export, Build, Plus, Open, Shader, Player, PopOut, PopIn,
     Select, Move, Rotate, Scale,
-    Spark, Warning, Remove, Up, Down, Undo, Redo, Check, Copy, Edit, Pushpin, Backdrop, Wearer
+    Spark, Warning, Remove, Up, Down, Undo, Redo, Check, Copy, Edit, Pushpin, Backdrop, Wearer, ExpandAll, CollapseAll
 }
 
 /** Vector icons share the current font scale and need no external font or texture. */
@@ -232,6 +232,16 @@ public static class ImGuiIcons
                 // A head and shoulders, apart from Player's whole figure.
                 draw.AddCircle(P(.5f, .3f), size * .2f, color, 12, stroke);
                 Line(.12f, 1, .25f, .66f); Line(.25f, .66f, .75f, .66f); Line(.75f, .66f, .88f, 1);
+                break;
+            case StudioIcon.ExpandAll:
+            case StudioIcon.CollapseAll:
+                // Two stacked chevrons, down to open every node and up to close them.
+                foreach (float top in (float[])[.15f, .5f])
+                {
+                    float edge = icon == StudioIcon.ExpandAll ? top : top + .3f;
+                    float point = icon == StudioIcon.ExpandAll ? top + .3f : top;
+                    Line(.15f, edge, .5f, point); Line(.5f, point, .85f, edge);
+                }
                 break;
         }
     }
