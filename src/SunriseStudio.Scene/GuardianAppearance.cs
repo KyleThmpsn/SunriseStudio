@@ -97,6 +97,11 @@ public sealed class GuardianAppearance
         (previewDefaults, previewDefaultsError) = previews;
     }
 
+    /** The armor slot 0..4 of an item definition, in GuardianLoadout.Armor order; -1 for any other item. */
+    public static int ArmorSlot(byte[] definition) =>
+        definition.Length > BucketField && (uint)(definition[BucketField] - FirstArmorBucket) < ArmorSlots
+            ? definition[BucketField] - FirstArmorBucket : -1;
+
     /** The class's gear-preview placeholder for armor slot 0..4, in GuardianLoadout.Armor order; 0 when there is none. */
     public uint PreviewDefault(byte classByte, int slot) =>
         classByte < previewDefaults.Count && (uint)slot < ArmorSlots ? previewDefaults[classByte][slot] : 0;
@@ -165,9 +170,8 @@ public sealed class GuardianAppearance
                     if (!catalog.TryGetEntry(tag, out var entry) || entry.Reference != InvestmentTags.ItemClass)
                         throw new InvalidDataException($"Item index {item} does not name an item definition.");
                     byte[] definition = catalog.Read(tag);
-                    if (definition.Length <= BucketField) continue;
-                    int slot = definition[BucketField] - FirstArmorBucket;
-                    if ((uint)slot < ArmorSlots && slots[slot] == 0) slots[slot] = tag;
+                    int slot = ArmorSlot(definition);
+                    if (slot >= 0 && slots[slot] == 0) slots[slot] = tag;
                 }
             }
             return (result, error);

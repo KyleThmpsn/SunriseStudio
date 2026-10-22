@@ -6,7 +6,11 @@ using SunriseStudio.Projects;
 namespace SunriseStudio.Authoring;
 
 public sealed record WeaponArtVariant(int Selector, uint WrapperTag, uint EntityTag,
-    IReadOnlyList<uint> ArtHashes);
+    IReadOnlyList<uint> ArtHashes)
+{
+    /** The variant's index among the arrangement row's art regions. */
+    public int Holder { get; init; }
+}
 public sealed record WeaponArchetypeSource(ushort GearIndex, ushort ArtIndex, uint EntityTag,
     IReadOnlyList<WeaponArtVariant> Variants);
 public sealed record PreparedWeaponArchetype(byte[] ItemDefinition,
@@ -63,14 +67,18 @@ public static class WeaponArchetypeAuthoring
             if (group < 0) throw new InvalidDataException("An art variant has no group.");
             int selector = table.U8(group);
             var hashes = table.Array(group + 8, ArtHashClass, 4);
-            if (hashes.Count == 0) throw new InvalidDataException("An art variant has no model.");
+            // A region with no art is optional and adds nothing to the weapon: no hashes, an empty first name or a wrapper
+            // that names no model.
+            if (hashes.Count == 0 || table.U32(hashes.Data) is 0 or uint.MaxValue or InvestmentItemClone.EmptyStringHash)
+                continue;
             uint[] values = Enumerable.Range(0, hashes.Count)
                 .Select(index => table.U32(hashes.Data + index * 4)).ToArray();
             uint wrapper = Resolve(artMap, ArtMapRowClass, values[0]);
             var wrapperBytes = Read(catalog, wrapper, WrapperClass);
             uint modelEntity = wrapperBytes.U32(16);
+            if (modelEntity is 0 or uint.MaxValue) continue;
             Read(catalog, modelEntity, EntityClass);
-            variants.Add(new(selector, wrapper, modelEntity, values));
+            variants.Add(new(selector, wrapper, modelEntity, values) { Holder = i });
         }
         if (variants.Count == 0 || variants.Select(value => value.Selector).Distinct().Count()
             != variants.Count)
@@ -189,22 +197,26 @@ public static class WeaponArchetypeAuthoring
         // The new row's holders, groups and hashes form one block of self-relative pointers.
         var output = new List<byte>();
         int newHolders = AppendArray(output, -1, HolderClass, oldHolders.Count, 8);
-        for (int i = 0; i < source.Variants.Count; i++)
+        for (int i = 0, v = 0; i < oldHolders.Count; i++)
         {
-            var variant = source.Variants[i];
             int originalGroup = arrangement.Relative(oldHolders.Data + i * 8);
             Align(output, 8);
             int group = output.Count;
             output.AddRange(arrangement.Slice(originalGroup, 24));
             Put64(output, newHolders + i * 8, group - newHolders - i * 8);
+            // An empty region stays empty in the copy.
+            if (v == source.Variants.Count || source.Variants[v].Holder != i)
+            { AppendArray(output, group + 8, ArtHashClass, 0, 4); continue; }
+            var variant = source.Variants[v];
             int hashes = AppendArray(output, group + 8, ArtHashClass, variant.ArtHashes.Count, 4);
             uint hash = NewName(artMap, ArtMapRowClass,
                 $"sunrise.weapon.art.{packageId:X4}.{firstEntry}.{variant.Selector}.{name}");
-            artMap = AppendName(artMap, ArtMapRowClass, hash, Tag(i + wrapperStart));
+            artMap = AppendName(artMap, ArtMapRowClass, hash, Tag(v + wrapperStart));
             for (int j = 0; j < variant.ArtHashes.Count; j++) Put32(output, hashes + j * 4, hash);
             byte[] wrapper = Read(catalog, variant.WrapperTag, WrapperClass).Data.ToArray();
             Put32(wrapper, 16, variantEntities[variant.Selector]);
-            Add(variant.WrapperTag, wrapper, i + wrapperStart, $"art-{variant.Selector}");
+            Add(variant.WrapperTag, wrapper, v + wrapperStart, $"art-{variant.Selector}");
+            v++;
         }
         // Block before rows: the rows stay last, so the next weapon reuses their bytes and leaves no dead copy.
         var (changedArt, blocks) = InvestmentItemClone.AppendRows(arrangement.Data,

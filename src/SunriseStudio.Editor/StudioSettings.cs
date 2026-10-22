@@ -19,11 +19,18 @@ public sealed class StudioSettings
     public bool FullDetail { get; set; }
     public bool ShowSceneTree { get; set; } = true;
     public float SceneTreeWidth { get; set; } = 280;
+    public float ModelPaneShare { get; set; } = .55f;
     public bool ShowSceneCursor { get; set; } = true;
     public bool ShowAssetCursor { get; set; } = true;
     public bool DiskCacheEnabled { get; set; } = true;
     public int DiskCacheLimitMiB { get; set; } = 512;
     public NativeLightingMode LightingMode { get; set; } = NativeLightingMode.Studio;
+    /** Asset previews draw a flat backdrop; off draws the viewer sky gradient behind them. */
+    public bool FlatBackdrop { get; set; }
+    /** The model pane keeps its controls shown; off shows them on hover. */
+    public bool PreviewToolsPinned { get; set; } = true;
+    /** The viewer opens with the orthographic view it was closed with. */
+    public bool Orthographic { get; set; }
     /** Kept as raw JSON so a damaged section falls back per action instead of resetting every preference. */
     public JsonElement? Shortcuts { get; set; }
     public JsonElement? Layout { get; set; }

@@ -39,6 +39,39 @@ public sealed partial class StudioWorkspace
         }
     }
 
+    /** Runs on a worker. An armor item without a readable model still opens, with the reason as a preview note. */
+    private StudioDocument ReadArmorModelDocument(PackageCatalog catalog, PackageEntry entry, string name,
+        AssetOpenContext context, StudioDocument document)
+    {
+        PreparedGuardian prepared;
+        IReadOnlyList<ArmorWearer> wearers;
+        try
+        {
+            ReportProgress("Assembling armor");
+            var assembler = GuardianAssemblerFor(catalog);
+            wearers = assembler.Wearers(entry.TagHash);
+            var wearer = wearers.FirstOrDefault(value => value.Class.BodyTag == context.EntityTag
+                && value.Female == context.ArmorFemale);
+            prepared = assembler.PrepareItem(entry.TagHash, wearer, OperationToken);
+        }
+        catch (Exception error) when (error is not (OperationCanceledException or OutOfMemoryException))
+        {
+            return document with { OpenContext = context, PreviewError = $"No armor model: {error.Message}" };
+        }
+        var scene = prepared.Scene;
+        Names?.NameScene(scene);
+        scene.Name = name;
+        var native = PrepareScene(scene, out string nativeError, assetPreview: true);
+        return document with
+        {
+            Scene = scene, Animation = prepared.Animation, Wearers = wearers, NativePlan = native, NativeError = nativeError,
+            OpenContext = context,
+            Surface = AssetSurface.Read(catalog, entry.TagHash, scene: scene, nameResolver: ResolveName,
+                token: OperationToken, decodedTextures: native?.Textures),
+            SourceTags = (document.SourceTags ?? new HashSet<uint>()).Concat(prepared.SourceTags).ToHashSet()
+        };
+    }
+
     /** Runs on a worker. A failed assembly keeps the body open with the reason as a preview note. */
     private StudioDocument ReadGuardianDocument(PackageCatalog catalog, PackageEntry entry, string name, AssetOpenContext context)
     {

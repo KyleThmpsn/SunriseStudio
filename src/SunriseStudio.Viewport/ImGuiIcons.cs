@@ -9,7 +9,7 @@ public enum StudioIcon
     Back, Forward, Expand, Collapse, Folder, Map, Cube, Pin, Light, Group,
     Play, Pause, Reset, Loop, Import, Export, Build, Plus, Open, Shader, Player, PopOut, PopIn,
     Select, Move, Rotate, Scale,
-    Spark, Warning, Remove, Up, Down, Undo, Redo, Check, Copy, Edit
+    Spark, Warning, Remove, Up, Down, Undo, Redo, Check, Copy, Edit, Pushpin, Backdrop
 }
 
 /** Vector icons share the current font scale and need no external font or texture. */
@@ -219,7 +219,18 @@ public static class ImGuiIcons
                 Rect(.05f, .3f, .7f, .95f); Rect(.3f, .05f, .95f, .7f);
                 break;
             case StudioIcon.Edit:
-                Line(.1f, .9f, .75f, .25f); Line(.75f, .25f, .9f, .4f); Line(.9f, .4f, .25f, 1); Line(.1f, .9f, .25f, 1);
+                // A pencil from its point at the bottom left: lead, sharpened cone, body and eraser band.
+                draw.AddTriangleFilled(P(.1f, .9f), P(.16f, .76f), P(.24f, .84f), color);
+                Line(.1f, .9f, .22f, .62f); Line(.1f, .9f, .38f, .78f);
+                Line(.22f, .62f, .82f, .02f); Line(.38f, .78f, .98f, .18f); Line(.82f, .02f, .98f, .18f);
+                Line(.22f, .62f, .38f, .78f); Line(.66f, .18f, .82f, .34f);
+                break;
+            case StudioIcon.Pushpin:
+                Line(.3f, .05f, .7f, .05f); Line(.38f, .05f, .38f, .4f); Line(.62f, .05f, .62f, .4f);
+                Line(.38f, .4f, .2f, .6f); Line(.62f, .4f, .8f, .6f); Line(.2f, .6f, .8f, .6f); Line(.5f, .6f, .5f, 1);
+                break;
+            case StudioIcon.Backdrop:
+                Rect(0, .1f, 1, .9f); draw.AddRectFilled(P(0, .55f), P(1, .9f), color);
                 break;
         }
     }

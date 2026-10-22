@@ -14,6 +14,12 @@ public sealed record PreparedGuardian(SceneDocument Scene, AssetAnimationSource?
     GuardianParts Parts, IReadOnlyList<string> Diagnostics, IReadOnlySet<uint> SourceTags,
     IReadOnlyDictionary<string, IReadOnlyList<string>> SlotNotes);
 
+/** A guardian that wears an armor item in its preview; EntityTag is the item's model entity for that class and gender. */
+public sealed record ArmorWearer(GuardianClass Class, bool Female, uint EntityTag)
+{
+    public string Name => $"{Class.Name} {GuardianAppearance.GenderNames[Female ? 1 : 0]}";
+}
+
 /** Thread-safe; caches the appearance tables and each body's base animation source for the catalog's life. */
 public sealed class GuardianAssembler(PackageCatalog catalog)
 {
@@ -69,8 +75,10 @@ public sealed class GuardianAssembler(PackageCatalog catalog)
     /**
      * Runs on a worker. Scene.TagHash = bodyTag; instance names are prefixed with their part label.
      * A part that cannot load or skin is left out or stays at bind, with a diagnostic.
+     * @param shown The parts the scene draws; null draws all. Every part still joins the rig, so shown parts pose as worn.
      */
-    public PreparedGuardian Prepare(uint bodyTag, GuardianLoadout loadout, CancellationToken token = default)
+    public PreparedGuardian Prepare(uint bodyTag, GuardianLoadout loadout, CancellationToken token = default,
+        Func<GuardianPart, bool>? shown = null)
     {
         var parts = Appearance.Resolve(Catalog, bodyTag, loadout, token);
         var notes = new Notes(parts);
@@ -103,7 +111,7 @@ public sealed class GuardianAssembler(PackageCatalog catalog)
             undrawn += visible.Length - drawn.Length;
             if (drawn.Length == 0) { notes.Add(part.Label, "nothing to draw", $"Entity 0x{part.EntityTag:X8} has no drawn geometry."); continue; }
             foreach (var instance in drawn) instance.Name = $"{part.Label}: {instance.Name}";
-            scene.Instances.AddRange(drawn);
+            if (shown is null || shown(part)) scene.Instances.AddRange(drawn);
             loaded.Add((part, drawn));
         }
         if (undrawn != 0)
@@ -112,6 +120,41 @@ public sealed class GuardianAssembler(PackageCatalog catalog)
         var (animation, pose) = Animate(bodyTag, row, parts, loaded, notes, sources, token);
         return new(scene, animation, pose, parts, notes.Lines.AsReadOnly(), sources,
             notes.Slots.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.AsReadOnly(), StringComparer.Ordinal));
+    }
+
+    /** The guardians an armor item has art for, by class and then gender; art rows name a class or any class. */
+    public IReadOnlyList<ArmorWearer> Wearers(uint itemTag)
+    {
+        byte[] item = Catalog.Read(itemTag);
+        var wearers = new List<ArmorWearer>();
+        foreach (var guardianClass in GuardianClasses.All)
+            foreach (bool female in (bool[])[false, true])
+                try
+                {
+                    if (GuardianArt.ItemEntities(Catalog, item, guardianClass.ClassByte, female) is [var entity, ..])
+                        wearers.Add(new(guardianClass, female, entity));
+                }
+                catch (Exception error) when (error is InvalidDataException or KeyNotFoundException or ArgumentException) { }
+        return wearers;
+    }
+
+    /**
+     * Runs on a worker. An armor item as an item preview shows it: worn and posed by the wearer, or the first guardian
+     * it has art for, with only the item's own parts drawn.
+     */
+    public PreparedGuardian PrepareItem(uint itemTag, ArmorWearer? wearer = null, CancellationToken token = default)
+    {
+        int slot = GuardianAppearance.ArmorSlot(Catalog.Read(itemTag));
+        if (slot < 0) throw new InvalidDataException("The item is not in an armor slot.");
+        wearer ??= Wearers(itemTag).FirstOrDefault() ?? throw new InvalidDataException("The item has no art for any class.");
+        var rows = Appearance.Rows;
+        var loadout = GuardianLoadout.Default.WithArmor(slot, itemTag) with
+        {
+            RaceGender = Enumerable.Range(0, rows.Count).FirstOrDefault(index => rows[index].Female == wearer.Female)
+        };
+        var prepared = Prepare(wearer.Class.BodyTag, loadout, token, part => part.ItemTag == itemTag);
+        if (prepared.Scene.Instances.Count == 0) throw new InvalidDataException("The item's art has no drawn geometry.");
+        return prepared;
     }
 
     /**

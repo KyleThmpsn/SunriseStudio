@@ -53,7 +53,8 @@ public sealed partial class StudioForm
     {
         var kind = popout.Panel;
         ClosePopout(kind);
-        if (layout.Find(kind) is null) layout.Show(kind);
+        // The preview returns to its document's model pane.
+        if (kind != StudioPanelKind.Preview && layout.Find(kind) is null) layout.Show(kind);
         layoutDirty = true;
     }
 

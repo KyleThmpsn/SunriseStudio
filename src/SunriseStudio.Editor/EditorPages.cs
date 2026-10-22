@@ -10,7 +10,38 @@ namespace SunriseStudio.Editor;
 /** ExportFullAsset asks for a folder, then exports the open asset to Blender; null where no export applies. */
 public sealed record StudioPageContext(StudioWorkspace Workspace, AssetViewport Viewport,
     Action<AssetProperty> SelectProperty, Action<MeshInstance>? SelectMesh = null,
-    MeshInstance? SelectedMesh = null, ImFontPtr MonospaceFont = default, Action? ExportFullAsset = null);
+    MeshInstance? SelectedMesh = null, ImFontPtr MonospaceFont = default, Action? ExportFullAsset = null)
+{
+    /** Opens the Preview editor in its own window; null where the view cannot pop out. */
+    public Action? PopOutPreview { get; init; }
+    /** True while the Preview editor shows the view, so no page draws it a second time. */
+    public bool PreviewElsewhere { get; init; }
+    /** Draws the model choice above the preview at the given width; null where there is none. */
+    public Action<float>? PreviewChoice { get; init; }
+
+    /**
+     * The view drawn in a bordered box with no padding, its controls shown on hover with Pop Out among them.
+     * The model choice sits above the box, within the size.
+     */
+    public void PreviewBox(string id, Vector2 size, Action draw)
+    {
+        ImGui.BeginGroup();
+        if (PreviewChoice is { } choice)
+        {
+            float top = ImGui.GetCursorPosY();
+            choice(size.X > 0 ? size.X : ImGui.GetContentRegionAvail().X);
+            if (size.Y > 0) size.Y = MathF.Max(1, size.Y - (ImGui.GetCursorPosY() - top));
+        }
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        ImGui.BeginChild(id, size, ImGuiChildFlags.Borders);
+        ImGui.PopStyleVar();
+        Viewport.ToolsOnHover = true; Viewport.PopOut = PopOutPreview;
+        draw();
+        Viewport.ToolsOnHover = false; Viewport.PopOut = null;
+        ImGui.EndChild();
+        ImGui.EndGroup();
+    }
+}
 
 public interface IStudioPage
 {
@@ -76,9 +107,9 @@ public sealed partial class ScenePage : IStudioPage
     {
         if (context.Workspace.Document?.Scene is not { } scene) return;
         var available = ImGui.GetContentRegionAvail();
-        ImGui.BeginChild("part-preview", new(0, Math.Max(150, available.Y * .55f)), ImGuiChildFlags.None);
-        context.Viewport.DrawImGui(ImGui.GetContentRegionAvail());
-        ImGui.EndChild();
+        if (!context.PreviewElsewhere)
+            context.PreviewBox("part-preview", new(0, Math.Max(150, available.Y * .55f)),
+                () => context.Viewport.DrawImGui(ImGui.GetContentRegionAvail()));
         if (scene.SpawnChoices.Count != 0 || scene.EntityVariants.Count != 0) SpawnInputs(context, scene);
         if (scene.EntityParameters.Count != 0) ParameterInputs(context, scene);
         if (scene.ObjectChannels.Count != 0) ChannelInputs(context, scene);
@@ -283,7 +314,11 @@ public sealed class PreviewPage : IStudioPage
     public string Id => "sunrise.preview";
     public string Title => "Scene";
     public bool CanOpen(StudioDocument document) => document.Scene is not null || document.Texture is not null;
-    public void Draw(StudioPageContext context) => context.Viewport.DrawImGui(ImGui.GetContentRegionAvail());
+    public void Draw(StudioPageContext context)
+    {
+        context.PreviewChoice?.Invoke(ImGui.GetContentRegionAvail().X);
+        context.Viewport.DrawImGui(ImGui.GetContentRegionAvail());
+    }
 }
 
 public sealed class PropertiesPage : IStudioPage
@@ -389,8 +424,9 @@ public sealed class ReferencesPage : IStudioPage
     public unsafe void Draw(StudioPageContext context)
     {
         if (context.Workspace.Document is not { } document) return;
-        ImGui.TextDisabled($"{document.Inspection.References.Count:N0} references");
-        if (!ImGui.BeginTable("references", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY
+        int count = document.Inspection.References.Count;
+        ImGui.TextDisabled(count == 0 ? "No references" : $"{count:N0} references");
+        if (count == 0 || !ImGui.BeginTable("references", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY
             | ImGuiTableFlags.Resizable, ImGui.GetContentRegionAvail())) return;
         ImGui.TableSetupColumn("Asset", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableSetupColumn("Offset", ImGuiTableColumnFlags.WidthFixed, 72);
