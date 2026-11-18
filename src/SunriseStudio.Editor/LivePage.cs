@@ -273,7 +273,7 @@ public sealed partial class LivePage : IDisposable, ILiveSection
         ImGui.SameLine(); ImGui.TextDisabled("|"); ImGui.SameLine();
         ImGui.AlignTextToFramePadding(); ImGui.TextUnformatted("Camera"); ImGui.SameLine();
         ImGui.SetNextItemWidth(140);
-        if (ImGui.Combo("##follow", ref follow, FollowModes, FollowModes.Length)) ReleaseCamera();
+        if (StudioControls.Combo("##follow", ref follow, FollowModes, FollowModes.Length)) ReleaseCamera();
         StudioUi.Tip("Game camera / orbit player");
         ImGui.SameLine(); ImGui.BeginDisabled(snapshot?.Player is null || follow == 1);
         if (ImGuiIcons.Button("live-snap", StudioIcon.Player, "Snap to player")) SnapToPlayer(viewport);
@@ -282,15 +282,15 @@ public sealed partial class LivePage : IDisposable, ILiveSection
         if (ImGuiIcons.Button("live-sync-button", StudioIcon.Loop, "Sync")) ImGui.OpenPopup("live-sync");
         if (ImGui.BeginPopup("live-sync"))
         {
-            ImGui.Checkbox("Map", ref syncWorld);
+            StudioControls.Checkbox("Map", ref syncWorld);
             StudioUi.Tip("Open the game's map and loaded bubbles");
-            ImGui.Checkbox("Loaded bubbles only", ref syncBubbles);
-            ImGui.Checkbox("Placements", ref syncPlacements);
+            StudioControls.Checkbox("Loaded bubbles only", ref syncBubbles);
+            StudioControls.Checkbox("Placements", ref syncPlacements);
             StudioUi.Tip("Match game positions; hide unspawned");
-            ImGui.Checkbox("Spawned entities", ref syncDynamic);
-            if (ImGui.Checkbox("Animation", ref syncAnimation) && !syncAnimation) StopAnimation();
+            StudioControls.Checkbox("Spawned entities", ref syncDynamic);
+            if (StudioControls.Checkbox("Animation", ref syncAnimation) && !syncAnimation) StopAnimation();
             StudioUi.Tip("Copy game poses");
-            if (ImGui.Checkbox("CUI screen", ref syncCui)) { requestedCui = shownCui = null; cuiSettle = null; }
+            if (StudioControls.Checkbox("CUI screen", ref syncCui)) { requestedCui = shownCui = null; cuiSettle = null; }
             StudioUi.Tip("Follow the game's top screen. " + StudioUi.MayBeInaccurate);
             ImGui.Separator();
             if (ImGui.Selectable("Sync map now")) requestedWorld = null;

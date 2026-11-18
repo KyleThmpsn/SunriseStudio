@@ -2,6 +2,7 @@ using ImGuiNET;
 using SunriseStudio.Packages;
 using SunriseStudio.Packages.Registry;
 using SunriseStudio.World;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor.Creation;
 
@@ -58,7 +59,7 @@ public sealed class DestinationWorkflow : CreationWorkflow
         host = new("Host content", CreationFieldKind.Rows, false,
             "The template's statics, terrain, collision, props and nav, and its squads, triggers and devices")
         {
-            DrawRows = () => ImGui.Checkbox("Remove host content##strip-host", ref stripHost),
+            DrawRows = () => StudioControls.Checkbox("Remove host content##strip-host", ref stripHost),
         };
     }
 
@@ -168,7 +169,7 @@ public sealed class DestinationWorkflow : CreationWorkflow
             string title = workspace.Names?.GameNames?.BubbleTitle(row.NameHash, "") is { Length: > 0 } known ? known : $"0x{row.NameHash:X8}";
             bool on = kept.Contains(row.NameHash);
             ImGui.BeginDisabled(!row.Copyable);
-            if (ImGui.Checkbox($"{title}##{row.NameHash:X8}", ref on))
+            if (StudioControls.Checkbox($"{title}##{row.NameHash:X8}", ref on))
             {
                 if (on) kept.Add(row.NameHash);
                 else kept.Remove(row.NameHash);

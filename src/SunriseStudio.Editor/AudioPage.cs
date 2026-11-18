@@ -129,13 +129,13 @@ public sealed partial class AudioPage : IStudioPage, IDisposable
         }
         ImGui.EndChild();
         DrawPlayback(context.Workspace);
-        if ((uint)selectedComposition < (uint)compositions.Count && ImGui.CollapsingHeader("Routing"))
+        if ((uint)selectedComposition < (uint)compositions.Count && StudioControls.CollapsingHeader("Routing"))
         {
             ImGui.BeginChild("audio-routing", new(0, 160), ImGuiChildFlags.Borders);
             ImGui.TextUnformatted(compositions[selectedComposition].Routing);
             ImGui.EndChild();
         }
-        if (session.CompositionLog.Length > 0 && ImGui.CollapsingHeader("Composer notes"))
+        if (session.CompositionLog.Length > 0 && StudioControls.CollapsingHeader("Composer notes"))
         {
             ImGui.BeginChild("audio-composer-notes", new(0, 160), ImGuiChildFlags.Borders);
             ImGui.TextUnformatted(session.CompositionLog);

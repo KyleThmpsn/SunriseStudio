@@ -27,7 +27,7 @@ public sealed partial class StudioForm
         ShortcutInput.Suspended = true;
         var map = ShortcutInput.Map;
         ImGui.SetNextItemWidth(280 * scale);
-        if (ImGui.BeginCombo("Preset", map.Title))
+        if (StudioControls.BeginCombo("Preset", map.Title))
         {
             foreach (var preset in ShortcutPresets.All)
                 if (ImGui.Selectable(preset.Name, !map.IsCustom && ReferenceEquals(map.Preset, preset)))

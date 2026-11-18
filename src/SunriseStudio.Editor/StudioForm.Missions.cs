@@ -72,7 +72,7 @@ public sealed partial class StudioForm
                     bubble.States.FirstOrDefault(state => state.PackageEnabled)?.Ordinal ?? bubble.States.FirstOrDefault()?.Ordinal ?? 0);
         }
         ImGui.SetNextItemWidth(200 * scale);
-        if (ImGui.Combo("Preview states", ref missionStateMode,
+        if (StudioControls.Combo("Preview states", ref missionStateMode,
             ["All authored states", "Package-enabled states", "Selected states"], 3)) missionStateDirty = true;
         ImGui.SameLine();
         ImGui.BeginDisabled(workspace.IsBusy || !missionStateDirty);
@@ -95,7 +95,7 @@ public sealed partial class StudioForm
             if (ImGui.TreeNodeEx(bubbleName, ImGuiTreeNodeFlags.DefaultOpen))
             {
                 bool visible = !hiddenBubbles.Contains(bubble.NameHash);
-                if (ImGui.Checkbox("Visible", ref visible))
+                if (StudioControls.Checkbox("Visible", ref visible))
                 { if (visible) hiddenBubbles.Remove(bubble.NameHash); else hiddenBubbles.Add(bubble.NameHash); }
                 ImGui.SameLine();
                 if (ImGui.SmallButton("Only this bubble"))
@@ -109,7 +109,7 @@ public sealed partial class StudioForm
                 {
                     int selected = selectedMissionStates.GetValueOrDefault(bubble.NameHash);
                     string title = bubble.States.FirstOrDefault(state => state.Ordinal == selected)?.Name ?? "No state";
-                    if (ImGui.BeginCombo("State", title))
+                    if (StudioControls.BeginCombo("State", title))
                     {
                         foreach (var state in bubble.States)
                             if (ImGui.Selectable(StateTitle(state) + "##" + state.Ordinal, state.Ordinal == selected))
@@ -199,7 +199,7 @@ public sealed partial class StudioForm
         ImGui.TextUnformatted($"{world.Scene.LightTables.Sum(table => table.Table.Rows.Count):N0} lights");
         DrawWorldRenderSettings();
         DrawMapLayers();
-        if (workspace.Names is { } names && ImGui.CollapsingHeader("Names"))
+        if (workspace.Names is { } names && StudioControls.CollapsingHeader("Names"))
         {
             var coverage = names.Coverage;
             ImGui.TextUnformatted($"{coverage.NamedTags:N0} named assets / {coverage.NamedHashes:N0} named hashes");
@@ -207,10 +207,10 @@ public sealed partial class StudioForm
             ImGui.TextDisabled(coverage.Stage);
             foreach (string diagnostic in names.Diagnostics.Take(30)) ImGui.TextWrapped(diagnostic);
         }
-        if (ImGui.CollapsingHeader("Load report"))
+        if (StudioControls.CollapsingHeader("Load report"))
             foreach (string diagnostic in world.Scene.Diagnostics.Take(100)) ImGui.TextWrapped(diagnostic);
         DrawCollisionReport(viewport!);
-        if (ImGui.CollapsingHeader("Shader report"))
+        if (StudioControls.CollapsingHeader("Shader report"))
         {
             ImGui.TextUnformatted($"{viewport!.NativePartCount:N0} native parts / {viewport.NativeFallbackPartCount:N0} visible fallback parts");
             if (viewport.NativeError is { } error) ImGui.TextWrapped(error);
@@ -222,17 +222,17 @@ public sealed partial class StudioForm
     /** Time of day, backdrop, exposure and the active lighting mode. */
     private void DrawWorldRenderSettings()
     {
-        if (!ImGui.CollapsingHeader("Environment", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        if (!StudioControls.CollapsingHeader("Environment", ImGuiTreeNodeFlags.DefaultOpen)) return;
         float time = viewport!.TimeOfDay;
         if (ImGui.SliderFloat("Time of day", ref time, 0, 1)) viewport.TimeOfDay = time;
         int backdrop = (int)viewport.Backdrop.Mode;
-        if (ImGui.Combo("Backdrop", ref backdrop, ["Follow cursor", "Fixed bubble", "All bubbles"], 3))
+        if (StudioControls.Combo("Backdrop", ref backdrop, ["Follow cursor", "Fixed bubble", "All bubbles"], 3))
             viewport.Backdrop.Mode = (SceneBackdropMode)backdrop;
         if (viewport.Backdrop.Mode == SceneBackdropMode.Fixed && workspace.World is { } world)
         {
             var bubbles = world.Scene.Bubbles.GroupBy(bubble => world.CanonicalBubble(bubble.TagHash)).Select(group => group.First()).ToArray();
             string title = bubbles.FirstOrDefault(bubble => world.CanonicalBubble(bubble.TagHash) == viewport.Backdrop.BubbleHash)?.Name ?? "Choose bubble";
-            if (ImGui.BeginCombo("Sky bubble", title))
+            if (StudioControls.BeginCombo("Sky bubble", title))
             {
                 foreach (var bubble in bubbles)
                     if (ImGui.Selectable(BubbleTitle(bubble.NameHash, bubble.Name) + "##" + bubble.TagHash)) viewport.Backdrop.BubbleHash = world.CanonicalBubble(bubble.TagHash);
@@ -242,7 +242,7 @@ public sealed partial class StudioForm
         if (viewport.NativeRenderer is { } native)
         {
             bool exposure = native.AutoExposure;
-            if (ImGui.Checkbox("Auto exposure", ref exposure))
+            if (StudioControls.Checkbox("Auto exposure", ref exposure))
             {
                 if (!exposure) native.ViewerStops = native.AppliedViewerStops;
                 native.AutoExposure = exposure;
@@ -263,7 +263,7 @@ public sealed partial class StudioForm
     private void DrawMapLayers()
     {
         if (workspace.World is not { } world || world.MapScene.MapLayers.Count == 0
-            || !ImGui.CollapsingHeader("Authored map layers")) return;
+            || !StudioControls.CollapsingHeader("Authored map layers")) return;
         if (configuredLayerMap != world.Map.Tag || !ReferenceEquals(configuredLayerOptions, world.Options))
         {
             configuredLayerMap = world.Map.Tag;
@@ -276,7 +276,7 @@ public sealed partial class StudioForm
         {
             bool selected = selectedMapLayers.Contains(layer.Index);
             string label = workspace.ResolveHash(layer.NameHash) ?? layer.Name;
-            if (ImGui.Checkbox($"{label}##layer-{layer.Index}", ref selected))
+            if (StudioControls.Checkbox($"{label}##layer-{layer.Index}", ref selected))
             { if (selected) selectedMapLayers.Add(layer.Index); else selectedMapLayers.Remove(layer.Index); }
         }
         ImGui.BeginDisabled(workspace.IsBusy);

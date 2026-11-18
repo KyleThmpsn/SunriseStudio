@@ -1,6 +1,7 @@
 using ImGuiNET;
 using SunriseStudio.Formats;
 using SunriseStudio.Projects;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor.Creation;
 
@@ -166,7 +167,7 @@ public sealed class PerkBehaviorWorkflow : CreationWorkflow
 
     private void DrawAdvanced()
     {
-        if (!ImGui.CollapsingHeader("Package settings")) return;
+        if (!StudioControls.CollapsingHeader("Package settings")) return;
         string value = package.Text;
         ImGui.SetNextItemWidth(150 * CreationWidgets.Scale);
         if (ImGui.InputText("Package ID", ref value, 4, ImGuiInputTextFlags.CharsHexadecimal)) package.Text = value;

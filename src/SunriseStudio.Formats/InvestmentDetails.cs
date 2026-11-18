@@ -83,13 +83,18 @@ public sealed partial class InvestmentCatalog
                 ushort plug = socket.InitialPlugItem;
                 var allowed = new HashSet<ushort>();
                 if (plug < Items.Count) allowed.Add(plug);
-                void Members(ReadOnlySpan<byte> source, ref readonly TagArray<PlugSetMember> descriptor)
+                List<ushort> reusable = [], randomized = [];
+                (int, uint) randomizedSet = (-1, 0);
+                void Members(ReadOnlySpan<byte> source, ref readonly TagArray<PlugSetMember> descriptor,
+                    List<ushort>? list = null)
                 {
                     var members = TagArray.Checked(source, TagView.OffsetOf(source, in descriptor), stride: Unsafe.SizeOf<PlugSetMember>());
                     for (int row = 0; row < members.Count; row++)
                     {
                         uint index = TagView.At<PlugSetMember>(source, members.Data + row * Unsafe.SizeOf<PlugSetMember>()).PlugItemIndex;
-                        if (index < Items.Count) allowed.Add((ushort)index);
+                        if (index >= Items.Count) continue;
+                        allowed.Add((ushort)index);
+                        list?.Add((ushort)index);
                     }
                 }
                 Read(() => Members(bytes.Span, in TagView.At<ItemOrdinarySocketEntry>(bytes.Span, p).EmbeddedPlugs), $"Socket {i} plug list");
@@ -99,22 +104,27 @@ public sealed partial class InvestmentCatalog
                         ReadOnlySpan<byte> table = sets;
                         var shared = TagArray.Checked(table, TagView.FieldOffset<C80802cb6>("Table"), stride: Unsafe.SizeOf<SPlugSetRow>());
                         ref readonly var owner = ref TagView.At<ItemOrdinarySocketEntry>(bytes.Span, p);
-                        foreach (ushort set in new[] { owner.ReusablePlugSetRow, owner.RandomizedPlugSetRow })
+                        foreach (var (set, list) in new[]
+                            { (owner.ReusablePlugSetRow, reusable), (owner.RandomizedPlugSetRow, randomized) })
                         {
                             if (set == ushort.MaxValue) continue;
                             if (set >= shared.Count) throw new InvalidDataException("Socket plug set is outside its index.");
-                            Members(table, in TagView.At<SPlugSetRow>(table, shared.Data + set * Unsafe.SizeOf<SPlugSetRow>()).Entries);
+                            ref readonly var row = ref TagView.At<SPlugSetRow>(table,
+                                shared.Data + set * Unsafe.SizeOf<SPlugSetRow>());
+                            Members(table, in row.Entries, list);
+                            if (list == randomized) randomizedSet = (set, row.Unk0);
                         }
                     }, $"Socket {i} shared plugs");
                 sockets.Add(new(i, socket.SocketType, plug, ItemName(plug), ViewProperty.Of(span, "Socket type", in socket.SocketType, true),
                     ViewProperty.Of(span, "Initial plug", in socket.InitialPlugItem, true),
-                    allowed.OrderBy(index => ItemName(index), StringComparer.OrdinalIgnoreCase).ToArray()));
-            }
-        }, "Sockets");
+                    allowed.OrderBy(index => ItemName(index), StringComparer.OrdinalIgnoreCase).ToArray())
+                { ReusablePlugs = reusable, RandomizedPlugs = randomized, RandomizedSet = randomizedSet });
+            }        }, "Sockets");
         InvestmentPursuit? pursuit = null;
         if (withPursuit) Read(() => pursuit = ReadPursuit(item, bytes, token), "Objectives");
-        var curves = ReadDisplayCurves(item, errors);
-        return new(item, stats, sockets, perks, fields, errors) { DisplayCurves = curves, Pursuit = pursuit };
+        var curves = ReadDisplayCurves(item, errors, out var statGroup);
+        return new(item, stats, sockets, perks, fields, errors)
+        { DisplayCurves = curves, StatGroup = statGroup, Pursuit = pursuit };
     }
 
     /** Conditional cost expressions remain visible and are never labelled a final price. */

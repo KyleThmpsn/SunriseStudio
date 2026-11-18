@@ -140,7 +140,7 @@ public sealed partial class MissionGraphPage
             bool main = ReferenceEquals(call, node.ApiCall);
             ImGui.PushID("api" + ordinal);
             if (main) ImGui.SeparatorText("Call: " + typed.Title);
-            bool open = main || ImGui.CollapsingHeader("Call: " + typed.Title + "##api-" + ordinal);
+            bool open = main || StudioControls.CollapsingHeader("Call: " + typed.Title + "##api-" + ordinal);
             Tip(CallSummary(typed));
             if (open) DrawApiCall(node.Key, ordinal, typed, editable);
             ImGui.PopID();
@@ -223,7 +223,7 @@ public sealed partial class MissionGraphPage
             case MissionApiWidget.Boolean:
             {
                 bool value = parameter.Text == "true";
-                if (ImGui.Checkbox("##value", ref value)) ApplyApiValue(key, ordinal, parameter.Path, value ? "true" : "false");
+                if (StudioControls.Checkbox("##value", ref value)) ApplyApiValue(key, ordinal, parameter.Path, value ? "true" : "false");
                 break;
             }
             case MissionApiWidget.Integer or MissionApiWidget.Number:
@@ -250,7 +250,7 @@ public sealed partial class MissionGraphPage
             case MissionApiWidget.Choice:
             {
                 ImGui.SetNextItemWidth(-1);
-                if (!ImGui.BeginCombo("##choice", parameter.Choice ?? "Choose")) break;
+                if (!StudioControls.BeginCombo("##choice", parameter.Choice ?? "Choose")) break;
                 foreach (string entry in parameter.Entries)
                     if (ImGui.Selectable(entry, entry == parameter.Choice) && entry != parameter.Choice) PickApiChoice(key, ordinal, parameter.Path, entry);
                 ImGui.EndCombo();
@@ -264,7 +264,7 @@ public sealed partial class MissionGraphPage
             case MissionApiWidget.Atom:
             {
                 ImGui.SetNextItemWidth(-1);
-                if (ImGui.BeginCombo("##kind", parameter.Choice ?? "Choose kind"))
+                if (StudioControls.BeginCombo("##kind", parameter.Choice ?? "Choose kind"))
                 {
                     foreach (string kind in parameter.Entries)
                         if (ImGui.Selectable(kind, kind == parameter.Choice) && kind != parameter.Choice)

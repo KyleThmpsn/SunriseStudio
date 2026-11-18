@@ -251,6 +251,7 @@ internal sealed partial class LiveInvestmentSection
                 var item = catalog.FindByHash(row.DefinitionHash);
                 ImGui.PushID(i);
                 string name = HeldName(catalog, row.DefinitionHash);
+                IconList.Stripe(i, IconList.RowHeight(scale));
                 if (IconList.Row(icons, scale, live.Selected?.SameRow(row) == true, catalog, item, true, name, HeldColour(item),
                     HeldDetail(live, item, row), "", false))
                     live.Selected = row;

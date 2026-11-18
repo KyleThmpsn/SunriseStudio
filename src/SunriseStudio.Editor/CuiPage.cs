@@ -282,7 +282,7 @@ public sealed partial class CuiPage : IPreparedStudioPage
         if (ImGui.Button("Fit")) fit = true;
         ImGui.SameLine(); ImGui.TextDisabled("Default profile");
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Static properties only");
-        ImGui.SameLine(); ImGui.Checkbox("Apply bindings", ref applyBindings);
+        ImGui.SameLine(); StudioControls.Checkbox("Apply bindings", ref applyBindings);
         if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Hide widgets whose bound visibility is false\n{bindingInputs.Count} inputs set, {bindingHidden.Count} widgets hidden");
         DrawStructureToolbar(context, scene);
         var choice = scene.Nodes.FirstOrDefault(node => node.Id == selectedComposed);

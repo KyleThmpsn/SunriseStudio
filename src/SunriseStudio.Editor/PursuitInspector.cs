@@ -3,6 +3,7 @@ using ImGuiNET;
 using SunriseStudio.Formats;
 using SunriseStudio.Live;
 using SunriseStudio.Rendering;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -193,7 +194,7 @@ internal sealed partial class PursuitInspector
         StudioUi.Facts("pursuit-live",
             [("In game", $"{step.Copies.Count} held copies", "Choose the copy this inspector shows.")]);
         ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo("##held-copy", $"0x{held.Instance:X16}{Dot}{status}")) return;
+        if (!StudioControls.BeginCombo("##held-copy", $"0x{held.Instance:X16}{Dot}{status}")) return;
         foreach (var copy in step.Copies)
             if (ImGui.Selectable($"0x{copy.Instance:X16}{Dot}{PursuitProgress.Status(copy)}", copy == held))
             {

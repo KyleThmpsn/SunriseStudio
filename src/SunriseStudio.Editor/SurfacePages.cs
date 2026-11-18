@@ -61,7 +61,7 @@ public sealed class MaterialsPage : IPreparedStudioPage
         var material = surface.Materials.FirstOrDefault(value => value.TagHash == selectedMaterial) ?? surface.Materials[0];
         selectedMaterial = material.TagHash;
         ImGui.SetNextItemWidth(-TreeExpansion.Width);
-        if (ImGui.BeginCombo("##material", material.Name))
+        if (StudioControls.BeginCombo("##material", material.Name))
         {
             foreach (var value in surface.Materials)
             {
@@ -116,7 +116,7 @@ public sealed class MaterialsPage : IPreparedStudioPage
             }
             ImGui.EndTable();
         }
-        if (additionalTextures.Length > 0 && ImGui.CollapsingHeader("Additional textures", expansion.Flags()))
+        if (additionalTextures.Length > 0 && StudioControls.CollapsingHeader("Additional textures", expansion.Flags()))
             foreach (uint tag in additionalTextures)
             {
                 ImGui.PushID(unchecked((int)tag));
@@ -134,7 +134,7 @@ public sealed class MaterialsPage : IPreparedStudioPage
             foreach (var stage in new[] { execution.Vertex, execution.Pixel, execution.Compute })
             {
                 if (stage.Shader is null && stage.ConstantTemplate.Length == 0 && stage.TfxConstants.Length == 0) continue;
-                if (!ImGui.CollapsingHeader($"{stage.Stage} constants", expansion.Flags())) continue;
+                if (!StudioControls.CollapsingHeader($"{stage.Stage} constants", expansion.Flags())) continue;
                 ImGui.PushID($"{stage.Stage}");
                 DrawVectors("Material", stage.ConstantTemplate, expansion.Flags());
                 DrawVectors("Expressions", stage.TfxConstants, expansion.Flags());
@@ -151,7 +151,7 @@ public sealed class MaterialsPage : IPreparedStudioPage
             ImGui.TextColored(StudioTheme.Accent, "Constants not read");
             StudioUi.Tip(material.Error);
         }
-        if (surface.Diagnostics.Count > 0 && ImGui.CollapsingHeader($"Load report ({surface.Diagnostics.Count})###Load report",
+        if (surface.Diagnostics.Count > 0 && StudioControls.CollapsingHeader($"Load report ({surface.Diagnostics.Count})###Load report",
             expansion.Flags()))
             StudioUi.Facts("surface-load-report", surface.Diagnostics);
         expansion.End();
@@ -207,7 +207,7 @@ public sealed class ShadersPage : IStudioPage
         if (context.Workspace.Document?.Surface is not { Shaders.Count: > 0 } surface) return;
         var selected = surface.Shaders.FirstOrDefault(shader => shader.TagHash == selectedShader) ?? surface.Shaders[0];
         ImGui.SetNextItemWidth(-TreeExpansion.Width);
-        if (ImGui.BeginCombo("##shader", $"{selected.Stage} / {selected.Name}"))
+        if (StudioControls.BeginCombo("##shader", $"{selected.Stage} / {selected.Name}"))
         {
             foreach (var shader in surface.Shaders)
             {
@@ -223,7 +223,7 @@ public sealed class ShadersPage : IStudioPage
         ImGui.SameLine();
         if (ImGui.SmallButton("Open bytecode")) context.Workspace.Select(selected.Shader.BytecodeTag);
         expansion.Begin();
-        if (ImGui.CollapsingHeader("Declarations", expansion.Flags()))
+        if (StudioControls.CollapsingHeader("Declarations", expansion.Flags()))
             foreach (string declaration in selected.Declarations) ImGui.TextUnformatted(declaration);
         if (!ReferenceEquals(previous, selected))
         {

@@ -7,6 +7,10 @@ public static class StudioTheme
 {
     public static readonly Vector4 Accent = new(0.95f, 0.42f, 0.16f, 1);
     public static readonly Vector4 Muted = new(0.48f, 0.53f, 0.61f, 1);
+    /** A problem, which blocks a workflow's action. */
+    public static readonly Vector4 Problem = new(1, .5f, .5f, 1);
+    /** A warning, which only shows. */
+    public static readonly Vector4 Warning = new(.79f, .56f, .31f, 1);
     public static readonly Vector4 Canvas = new(0.035f, 0.043f, 0.058f, 1);
     public static readonly Vector4 Panel = new(0.068f, 0.080f, 0.104f, 1);
     /** Status colours: done or connected, needs attention, failed or refused. */
@@ -33,17 +37,25 @@ public static class StudioTheme
         style.WindowPadding = new(12, 10);
         style.FramePadding = new(8, 5);
         style.ItemSpacing = new(8, 6);
+        // A table's text stands off its column borders by a frame's padding.
+        style.CellPadding = new(8, 3);
         // Areas tile with square corners and no border; the darker canvas between them is the line.
         // Boxes inside an area keep one border, and popups keep theirs so they stand out.
+        // Corners are eased, not round: two pixels on boxes, frames, tabs and grabs, three on popups.
         style.WindowRounding = 0;
-        style.ChildRounding = 4;
-        style.PopupRounding = 6;
-        style.FrameRounding = 4;
-        style.GrabRounding = 4;
+        style.ChildRounding = 2;
+        style.PopupRounding = 3;
+        style.FrameRounding = 2;
+        style.GrabRounding = 2;
+        style.TabRounding = 2;
+        style.ScrollbarRounding = 2;
         style.WindowBorderSize = 0;
         style.ChildBorderSize = 1;
         style.PopupBorderSize = 1;
-        style.FrameBorderSize = 0;
+        // Frames match the panel closely, so an outline is what shows an empty checkbox or field.
+        style.FrameBorderSize = 1;
+        // A section's rule is a hairline, like the borders around it.
+        style.SeparatorTextBorderSize = 1;
         style.ScrollbarSize = 12;
         var colors = style.Colors;
         colors[(int)ImGuiCol.Text] = new(0.92f, 0.94f, 0.97f, 1);

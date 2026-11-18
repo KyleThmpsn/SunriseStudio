@@ -3,6 +3,7 @@ using System.Diagnostics;
 using ImGuiNET;
 using SunriseStudio.Live;
 using SunriseStudio.Rendering;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -147,7 +148,7 @@ internal sealed class LiveTab : IDisposable
         // Wide enough for the longest label a process id can give, plus the combo's arrow.
         ImGui.SetNextItemWidth(ImGui.CalcTextSize($"Destiny 2 ({uint.MaxValue})").X + ImGui.GetFrameHeight() + 2 * ImGui.GetStyle().FramePadding.X);
         string shown = attached is { } chosen ? Label(chosen) : processes.Count == 0 ? "No running game" : Label(processes[selected]);
-        if (ImGui.BeginCombo("##live-process", shown))
+        if (StudioControls.BeginCombo("##live-process", shown))
         {
             for (int i = 0; i < processes.Count; i++)
                 if (ImGui.Selectable($"{Label(processes[i])}##{processes[i].Id}", selected == i)) selected = i;

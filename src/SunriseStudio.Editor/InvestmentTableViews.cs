@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using ImGuiNET;
 using SunriseStudio.Formats;
 using SunriseStudio.Packages;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -220,7 +221,7 @@ internal static class InvestmentTableViews
     {
         if (problems.Count == 0) return -1;
         ImGui.PushStyleColor(ImGuiCol.Text, StudioTheme.Failure);
-        bool open = ImGui.CollapsingHeader($"Problems ({problems.Count})###{id}");
+        bool open = StudioControls.CollapsingHeader($"Problems ({problems.Count})###{id}");
         ImGui.PopStyleColor();
         StudioUi.Tip(tip);
         int chosen = -1;

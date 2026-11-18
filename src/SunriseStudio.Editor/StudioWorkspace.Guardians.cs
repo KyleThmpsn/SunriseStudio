@@ -10,6 +10,7 @@ public sealed partial class StudioWorkspace
 {
     private readonly object guardianLock = new();
     private GuardianAssembler? guardianAssembler;
+    private (PackageCatalog Catalog, IReadOnlyList<IReadOnlyList<int>> Items)? collectionPages;
 
     /** True exports every body clip with a guardian; false exports the weapon hold pose alone. */
     public bool GuardianExportAllClips { get; set; } = true;
@@ -39,6 +40,21 @@ public sealed partial class StudioWorkspace
         }
     }
 
+    /** The item indices each Collections page lists, read once per catalog; armor sets have a page each. */
+    private IReadOnlyList<IReadOnlyList<int>> CollectionPages(PackageCatalog catalog)
+    {
+        lock (guardianLock)
+        {
+            if (collectionPages is { } held && ReferenceEquals(held.Catalog, catalog)) return held.Items;
+            var sources = new InvestmentSources();
+            var nodes = InvestmentCollections.ReadNodes(catalog.Read(sources.PresentationNodes),
+                catalog.Read(sources.PresentationNodeDisplays), (_, _) => "");
+            var items = InvestmentCollections.NodeItems(catalog.Read(sources.Collectibles), nodes);
+            collectionPages = (catalog, items);
+            return items;
+        }
+    }
+
     /** Armor previews draw their wearer, not only the piece, and weapons open in a guardian's hands; reopen to apply. */
     public bool ShowGuardian { get; set; }
 
@@ -64,7 +80,7 @@ public sealed partial class StudioWorkspace
                 && value.Female == context.WearerFemale) ?? wearers.FirstOrDefault()
                 ?? throw new InvalidDataException("The item has no art for any class.");
             prepared = armor ? assembler.PrepareItem(document.Entry.TagHash, wearer, OperationToken, ShowGuardian)
-                : assembler.PrepareWearer(wearer, dyes, OperationToken, weapon);
+                : assembler.PrepareWearer(wearer, dyes, OperationToken, weapon, dyes is null ? null : CollectionPages(catalog));
         }
         catch (Exception error) when (error is not (OperationCanceledException or OutOfMemoryException))
         {

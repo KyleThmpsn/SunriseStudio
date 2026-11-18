@@ -9,12 +9,48 @@ public enum StudioIcon
     Back, Forward, Expand, Collapse, Folder, Map, Cube, Pin, Light, Group,
     Play, Pause, Reset, Loop, Import, Export, Build, Plus, Open, Shader, Player, PopOut, PopIn,
     Select, Move, Rotate, Scale,
-    Spark, Warning, Remove, Up, Down, Undo, Redo, Check, Copy, Edit, Pushpin, Backdrop, Wearer, ExpandAll, CollapseAll
+    Spark, Warning, Remove, Up, Down, Undo, Redo, Check, Copy, Edit, Pushpin, Backdrop, Wearer, ExpandAll, CollapseAll,
+    FullScreen, ExitFullScreen
 }
 
-/** Vector icons share the current font scale and need no external font or texture. */
+/**
+ * Icons draw from the icon face when the editor loaded one, and as vectors otherwise. Vector icons share the current
+ * font scale and need no external font or texture.
+ */
 public static class ImGuiIcons
 {
+    /** The icon face at the current size; null draws every icon as vectors. */
+    public static ImFontPtr? Font { get; set; }
+
+    // Each icon's glyph in the Lucide face shipped with the editor (lucide-static 1.74.0). The face numbers its glyphs
+    // per release, so these change with the font file.
+    private static readonly Dictionary<StudioIcon, char> Glyphs = new()
+    {
+        [StudioIcon.Eye] = '\uE0BA', [StudioIcon.EyeOff] = '\uE0BB', [StudioIcon.Frame] = '\uE112',
+        [StudioIcon.Focus] = '\uE29E', [StudioIcon.Cursor] = '\uE0AC', [StudioIcon.Grid] = '\uE0E9',
+        [StudioIcon.Wireframe] = '\uE0E8', [StudioIcon.Ortho] = '\uE524', [StudioIcon.Tree] = '\uE408',
+        [StudioIcon.Filter] = '\uE0DC', [StudioIcon.Back] = '\uE06E', [StudioIcon.Forward] = '\uE06F',
+        [StudioIcon.Expand] = '\uE06D', [StudioIcon.Collapse] = '\uE070', [StudioIcon.Folder] = '\uE0D7',
+        [StudioIcon.Map] = '\uE110', [StudioIcon.Cube] = '\uE061', [StudioIcon.Pin] = '\uE111',
+        [StudioIcon.Light] = '\uE1C2', [StudioIcon.Group] = '\uE464', [StudioIcon.Play] = '\uE13C',
+        [StudioIcon.Pause] = '\uE12E', [StudioIcon.Reset] = '\uE148', [StudioIcon.Loop] = '\uE146',
+        [StudioIcon.Import] = '\uE0B2', [StudioIcon.Export] = '\uE19E', [StudioIcon.Build] = '\uE0EC',
+        [StudioIcon.Plus] = '\uE13D', [StudioIcon.Open] = '\uE04D', [StudioIcon.Shader] = '\uE59C',
+        [StudioIcon.Player] = '\uE21E', [StudioIcon.PopOut] = '\uE5A4', [StudioIcon.PopIn] = '\uE5A1',
+        [StudioIcon.Select] = '\uE1C3', [StudioIcon.Move] = '\uE121', [StudioIcon.Rotate] = '\uE149',
+        [StudioIcon.Scale] = '\uE2EC', [StudioIcon.Spark] = '\uE412', [StudioIcon.Warning] = '\uE193',
+        [StudioIcon.Remove] = '\uE18E', [StudioIcon.Up] = '\uE04A', [StudioIcon.Down] = '\uE042',
+        [StudioIcon.Undo] = '\uE2A1', [StudioIcon.Redo] = '\uE2A0', [StudioIcon.Check] = '\uE06C',
+        [StudioIcon.Copy] = '\uE09E', [StudioIcon.Edit] = '\uE1F9', [StudioIcon.Pushpin] = '\uE259',
+        [StudioIcon.Backdrop] = '\uE0F6', [StudioIcon.Wearer] = '\uE19F', [StudioIcon.ExpandAll] = '\uE071',
+        [StudioIcon.CollapseAll] = '\uE074', [StudioIcon.FullScreen] = '\uE21A', [StudioIcon.ExitFullScreen] = '\uE220'
+    };
+    // A glyph's art fills 20 of the 24 units of its box, so it is drawn this much larger to match a vector icon's size.
+    private const float GlyphScale = 24f / 20;
+
+    /** The glyphs the icon face must bake. */
+    public static IEnumerable<char> GlyphSet => Glyphs.Values;
+
     /** Disabled actions retain their tooltips and inherit the current UI opacity. */
     public static bool Button(string id, StudioIcon icon, string tooltip, bool active = false, float size = 0)
     {
@@ -39,6 +75,12 @@ public static class ImGuiIcons
     /** Coordinates use a unit square so every control draws the same stroke weight. */
     public static void Draw(ImDrawListPtr draw, StudioIcon icon, Vector2 origin, float size, uint color)
     {
+        if (Font is { } face && Glyphs.TryGetValue(icon, out char glyph))
+        {
+            float box = size * GlyphScale;
+            draw.AddText(face, box, origin - new Vector2((box - size) / 2), color, glyph.ToString());
+            return;
+        }
         float stroke = Math.Max(1, size * .085f);
         Vector2 P(float x, float y) => origin + new Vector2(x, y) * size;
         void Line(float x1, float y1, float x2, float y2) => draw.AddLine(P(x1, y1), P(x2, y2), color, stroke);
@@ -56,6 +98,8 @@ public static class ImGuiIcons
                 break;
             case StudioIcon.Frame:
             case StudioIcon.Focus:
+            case StudioIcon.FullScreen:
+            case StudioIcon.ExitFullScreen:
                 Line(0, .3f, 0, 0); Line(0, 0, .3f, 0);
                 Line(.7f, 0, 1, 0); Line(1, 0, 1, .3f);
                 Line(0, .7f, 0, 1); Line(0, 1, .3f, 1);
@@ -219,7 +263,11 @@ public static class ImGuiIcons
                 Rect(.05f, .3f, .7f, .95f); Rect(.3f, .05f, .95f, .7f);
                 break;
             case StudioIcon.Edit:
-                Line(.1f, .9f, .75f, .25f); Line(.75f, .25f, .9f, .4f); Line(.9f, .4f, .25f, 1); Line(.1f, .9f, .25f, 1);
+                // A pencil from its point at the bottom left: lead, sharpened cone, body and eraser band.
+                draw.AddTriangleFilled(P(.1f, .9f), P(.16f, .76f), P(.24f, .84f), color);
+                Line(.1f, .9f, .22f, .62f); Line(.1f, .9f, .38f, .78f);
+                Line(.22f, .62f, .82f, .02f); Line(.38f, .78f, .98f, .18f); Line(.82f, .02f, .98f, .18f);
+                Line(.22f, .62f, .38f, .78f); Line(.66f, .18f, .82f, .34f);
                 break;
             case StudioIcon.Pushpin:
                 Line(.3f, .05f, .7f, .05f); Line(.38f, .05f, .38f, .4f); Line(.62f, .05f, .62f, .4f);

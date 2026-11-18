@@ -23,12 +23,36 @@ internal sealed class WindowChrome(Form form)
     public float Scale { get; set; } = 1;
     // Set at the end of each frame; the hit test between frames reads it.
     private bool overItem;
+    // The state and bounds full screen returns to; null while the window is not full screen.
+    private (FormWindowState State, Rectangle Bounds)? windowed;
+
+    /** True while the window covers its screen, with no border, resize edges or caption. */
+    public bool FullScreen => windowed is not null;
+
+    /** Covers the screen the window is on, or returns the window to the state and bounds it had. */
+    public void SetFullScreen(bool on)
+    {
+        if (on == FullScreen) return;
+        if (on)
+        {
+            windowed = (form.WindowState, form.WindowState == FormWindowState.Normal ? form.Bounds : form.RestoreBounds);
+            var screen = Screen.FromControl(form).Bounds;
+            form.WindowState = FormWindowState.Normal;
+            form.Bounds = screen;
+        }
+        else if (windowed is var (state, bounds))
+        {
+            windowed = null;
+            form.Bounds = bounds;
+            form.WindowState = state;
+        }
+    }
 
     /** Call after the window's frame, with its ImGui context current. */
     public void EndFrame()
     {
         overItem = ImGui.IsAnyItemHovered() || ImGui.IsAnyItemActive() || ImGui.IsPopupOpen("", ImGuiPopupFlags.AnyPopupId);
-        if (!Maximized && !Minimized)
+        if (!Maximized && !Minimized && !FullScreen)
             ImGui.GetForegroundDrawList().AddRect(Vector2.Zero, new(form.ClientSize.Width, form.ClientSize.Height),
                 ImGui.GetColorU32(ImGuiCol.Border));
     }
@@ -85,6 +109,7 @@ internal sealed class WindowChrome(Form form)
 
     private nint HitTest(Point point)
     {
+        if (FullScreen) return HTCLIENT;
         if (!Maximized)
         {
             int band = (int)MathF.Ceiling(ResizeBand * Scale);

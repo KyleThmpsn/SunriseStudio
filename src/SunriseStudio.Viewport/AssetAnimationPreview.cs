@@ -461,7 +461,7 @@ public sealed class AssetAnimationPreview : IDisposable
         ImGui.SetNextItemWidth(MathF.Min(160, MathF.Max(1, available)));
         string label = IsLoading ? $"Loading {pendingTag:X8}" : Clip is null ? "Bind pose"
             : Source.ClipNames.GetValueOrDefault(Clip.TagHash, $"{Clip.TagHash:X8}");
-        bool clipsOpen = ImGui.BeginCombo("##clip", label, ImGuiComboFlags.HeightLarge);
+        bool clipsOpen = StudioControls.BeginCombo("##clip", label, ImGuiComboFlags.HeightLarge);
         if (!clipsOpen && !IsLoading && Clip is not null) TagTip(Clip.TagHash);
         if (clipsOpen)
         {
@@ -482,7 +482,7 @@ public sealed class AssetAnimationPreview : IDisposable
         {
             Next(230);
             ImGui.SetNextItemWidth(200);
-            if (ImGui.BeginCombo("Base", BaseClip is null ? "Rig pose" : Source.ClipNames[BaseClip.TagHash]))
+            if (StudioControls.BeginCombo("Base", BaseClip is null ? "Rig pose" : Source.ClipNames[BaseClip.TagHash]))
             {
                 if (ImGui.Selectable("Rig pose", BaseClip is null)) SelectBaseClip(null);
                 foreach (uint tag in Source.BaseClipTags)

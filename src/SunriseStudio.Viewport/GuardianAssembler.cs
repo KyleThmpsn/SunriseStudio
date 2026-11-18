@@ -157,16 +157,17 @@ public sealed class GuardianAssembler(PackageCatalog catalog)
      * Runs on a worker. A guardian in the default loadout, for an item shown on it rather than worn.
      * A shader's dyes go on showcase armor, since the default slots hold undyed placeholders.
      * @param weapon The weapon item it holds in its hold pose; 0 holds none.
+     * @param armorSets Item indices of each Collections page, searched for the showcase armor.
      */
     public PreparedGuardian PrepareWearer(ItemWearer wearer, NativeGearDyes? armorDyes = null, CancellationToken token = default,
-        uint weapon = 0)
+        uint weapon = 0, IEnumerable<IReadOnlyList<int>>? armorSets = null)
     {
         var loadout = DefaultLoadout(wearer.Female) with { Weapon = weapon };
         if (armorDyes is not null)
         {
             byte classByte = wearer.Class.ClassByte;
             uint[] armor = GuardianArt.ShowcaseArmor(Catalog, classByte, wearer.Female,
-                Appearance.PreviewDefault(classByte, GuardianAppearance.ArmorSlots - 1));
+                Appearance.PreviewDefault(classByte, GuardianAppearance.ArmorSlots - 1), armorSets ?? []);
             for (int slot = 0; slot < armor.Length; slot++)
                 if (armor[slot] != 0) loadout = loadout.WithArmor(slot, armor[slot]);
         }

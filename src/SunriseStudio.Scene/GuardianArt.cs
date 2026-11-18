@@ -10,51 +10,46 @@ namespace SunriseStudio.Scene;
 public static class GuardianArt
 {
     private const ushort NoGearRow = 0xFFFF, NoPlug = 0xFFFF;
-    // Assumed: a set's five pieces sit within four rows of each other in the item index.
-    private const int SetRun = 4, ClassItemSlot = 4;
     private static readonly ConditionalWeakTable<PackageCatalog, GuardianArtTables> SharedTables = new();
-    /** Shown with a shader preview, since ShowcaseArmor rests on assumptions. */
-    public const string ShowcaseNote = "Showcase armor: Legendary (assumed tier 4) pieces within four item index rows"
-        + " of a class item, assumed to be one set. May be inaccurate.";
 
     /**
-     * Armor to show a shader on, helmet to class item, all Legendary with a model for this gender.
-     * Assumed: class items of one class share their display word; the set is the armor near the class item.
-     * @param placeholder The class's gear-preview class item.
-     * @return Every slot 0 when no complete set is found.
+     * Armor to show a shader on, helmet to class item: the first set of five Legendary pieces of the class, one per
+     * slot, each with a model for this gender.
+     * @param placeholder The class's gear-preview class item, whose class key picks the class.
+     * @param sets Item indices of each Collections page, in page order; a set's page lists its five pieces.
+     * @return Every slot 0 when no page holds such a set.
      */
-    public static uint[] ShowcaseArmor(PackageCatalog catalog, byte classByte, bool female, uint placeholder)
+    public static uint[] ShowcaseArmor(PackageCatalog catalog, byte classByte, bool female, uint placeholder,
+        IEnumerable<IReadOnlyList<int>> sets)
     {
         var tables = TablesFor(catalog);
         return tables.Showcase.GetOrAdd((classByte, female), _ =>
         {
             var empty = new uint[GuardianAppearance.ArmorSlots];
-            if (tables.IndexOf(placeholder) is not { } own || tables.DisplayWord(own) is not { } type) return empty;
-            bool Fits(int index, out int slot, out uint tag)
+            if (tables.IndexOf(placeholder) is not { } own || tables.ClassKey(own) is not { } key) return empty;
+            foreach (var set in sets)
             {
-                slot = -1; tag = 0;
-                if (tables.ItemTag(index) is not { } found) return false;
-                byte[] definition = catalog.Read(found);
-                slot = GuardianAppearance.ArmorSlot(definition);
-                if (slot < 0 || Tier(definition) != InvestmentItemKinds.LegendaryTier) return false;
-                try { if (ItemEntities(tables, definition, classByte, female).Count == 0) return false; }
-                catch (Exception error) when (error is InvalidDataException or KeyNotFoundException or ArgumentException) { return false; }
-                tag = found;
-                return true;
-            }
-            for (int index = 0; index < tables.ItemCount; index++)
-            {
-                if (!Fits(index, out int slot, out uint classItem) || slot != ClassItemSlot
-                    || tables.DisplayWord(index) != type) continue;
+                if (set.Count != GuardianAppearance.ArmorSlots) continue;
                 var armor = new uint[GuardianAppearance.ArmorSlots];
-                armor[ClassItemSlot] = classItem;
-                for (int near = Math.Max(0, index - SetRun); near <= index + SetRun && near < tables.ItemCount; near++)
-                    if (near != index && Fits(near, out int piece, out uint tag) && piece != ClassItemSlot && armor[piece] == 0)
-                        armor[piece] = tag;
+                foreach (int index in set)
+                    if (tables.ClassKey(index) == key && Fits(index, out int slot, out uint tag) && armor[slot] == 0) armor[slot] = tag;
                 if (!armor.Contains(0u)) return armor;
             }
             return empty;
         });
+
+        bool Fits(int index, out int slot, out uint tag)
+        {
+            slot = -1; tag = 0;
+            if (tables.ItemTag(index) is not { } found) return false;
+            byte[] definition = catalog.Read(found);
+            slot = GuardianAppearance.ArmorSlot(definition);
+            if (slot < 0 || Tier(definition) != InvestmentItemKinds.LegendaryTier) return false;
+            try { if (ItemEntities(tables, definition, classByte, female).Count == 0) return false; }
+            catch (Exception error) when (error is InvalidDataException or KeyNotFoundException or ArgumentException) { return false; }
+            tag = found;
+            return true;
+        }
     }
 
     /** The first shader plug the item's sockets start with, as its item definition tag; 0 when none does. */
@@ -267,8 +262,11 @@ internal sealed class GuardianArtTables
         return (uint)index < (uint)tags.Length && IsClass(tags[index], InvestmentTags.ItemClass) ? tags[index] : null;
     }
 
-    /** The unnamed display word at DisplayProperties +0x38 of the display at this index; null when it does not read. */
-    public uint? DisplayWord(int index)
+    /**
+     * The class key of the display at this index; null when it does not read. On every stock armor piece
+     * DisplayProperties.Unk38 names one class, as its type line does.
+     */
+    public uint? ClassKey(int index)
     {
         const string word = "DisplayProperties.Unk38";
         var tags = displays.Value;

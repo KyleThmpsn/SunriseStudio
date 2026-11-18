@@ -118,7 +118,7 @@ public sealed partial class StudioForm
             int index = view.SelectedCollision;
             if (collisionRows is not { } cached || !ReferenceEquals(cached.Scene, scene) || cached.Placement != index)
                 collisionRows = cached = (scene, index, CollisionJoin.StaticRows(source, scene, placement));
-            if (ImGui.CollapsingHeader("Static instance", ImGuiTreeNodeFlags.DefaultOpen))
+            if (StudioControls.CollapsingHeader("Static instance", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 if (cached.Rows.Count == 0) ImGui.TextDisabled("No placed row at this transform");
                 foreach (var row in cached.Rows)
@@ -145,7 +145,7 @@ public sealed partial class StudioForm
     {
         var shape = scene.Pieces[placement.Piece].Shape;
         if (shape.TriangleCount == 0) return;
-        if (!ImGui.CollapsingHeader("Parts", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        if (!StudioControls.CollapsingHeader("Parts", ImGuiTreeNodeFlags.DefaultOpen)) return;
         var parts = CollisionParts.Of(shape);
         int picked = view.SelectedCollisionTriangle is >= 0 and var triangle && triangle < parts.PartOfTriangle.Length
             ? parts.PartOfTriangle[triangle] : -1;
@@ -241,7 +241,7 @@ public sealed partial class StudioForm
         var connectScope = connectScopes.GetValueOrDefault(kind, kind);
         int scope = (int)connectScope;
         ImGui.SetNextItemWidth(-1);
-        if (ImGui.Combo("##connect-scope", ref scope, scopes, scopes.Length)) connectScopes[kind] = connectScope = (CollisionConnectScope)scope;
+        if (StudioControls.Combo("##connect-scope", ref scope, scopes, scopes.Length)) connectScopes[kind] = connectScope = (CollisionConnectScope)scope;
         StudioUi.Tip("This shape: the picked placement\nThis entity: its shown shapes\nTouching shapes: any shown shape that touches");
         ImGui.SetNextItemWidth(-1);
         ImGui.InputFloat("##connect-gap", ref connectGap, .01f, .1f, "Gap %.3f m");
@@ -269,7 +269,7 @@ public sealed partial class StudioForm
         var project = workspace.Project;
         ImGui.BeginDisabled(reason is not null || !workspace.CanEdit);
         ImGui.SetNextItemWidth(-1);
-        bool open = ImGui.BeginCombo("##collision-group", "Add to group");
+        bool open = StudioControls.BeginCombo("##collision-group", "Add to group");
         if (reason is not null) StudioUi.Tip(reason);
         if (open)
         {
@@ -304,7 +304,7 @@ public sealed partial class StudioForm
     /** Counts, load time, content without triangles, and every load note. */
     private static void DrawCollisionReport(AssetViewport view)
     {
-        if (!ImGui.CollapsingHeader("Collision")) return;
+        if (!StudioControls.CollapsingHeader("Collision")) return;
         if (view.CollisionStatus.Length > 0)
         {
             ImGui.TextDisabled(FirstSentence(view.CollisionStatus));

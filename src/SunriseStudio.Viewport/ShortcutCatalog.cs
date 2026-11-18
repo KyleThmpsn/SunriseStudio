@@ -52,6 +52,7 @@ public static class ShortcutActions
     public const string HideSelection3D = "3d.hide_selection";
     public const string ShowAll3D = "3d.show_all";
     public const string TogglePlayer3D = "3d.toggle_player";
+    public const string FullScreen3D = "3d.full_screen";
 
     private static readonly ShortcutKind[] KeyOnly = [ShortcutKind.Key];
     private static readonly ShortcutKind[] KeyOrClick = [ShortcutKind.Key, ShortcutKind.Click];
@@ -99,7 +100,8 @@ public static class ShortcutActions
         new(ToggleTree3D, "Show or hide the object tree", ShortcutSection.View3D, KeyOnly),
         new(HideSelection3D, "Hide selected object", ShortcutSection.View3D, KeyOnly),
         new(ShowAll3D, "Show all objects", ShortcutSection.View3D, KeyOnly),
-        new(TogglePlayer3D, "Toggle player camera", ShortcutSection.View3D, KeyOnly)
+        new(TogglePlayer3D, "Toggle player camera", ShortcutSection.View3D, KeyOnly),
+        new(FullScreen3D, "Full screen", ShortcutSection.View3D, KeyOnly)
     ];
 
     private static readonly Dictionary<string, ShortcutAction> ById = All.ToDictionary(action => action.Id, StringComparer.Ordinal);
@@ -193,7 +195,8 @@ public static class ShortcutPresets
         (ShortcutActions.ToggleTree3D, ""),
         (ShortcutActions.HideSelection3D, ""),
         (ShortcutActions.ShowAll3D, ""),
-        (ShortcutActions.TogglePlayer3D, "")
+        (ShortcutActions.TogglePlayer3D, ""),
+        (ShortcutActions.FullScreen3D, "F11")
     ];
 
     private static (string Id, string Bindings)[] BlenderRows() =>
@@ -234,7 +237,8 @@ public static class ShortcutPresets
         (ShortcutActions.ToggleTree3D, ""),
         (ShortcutActions.HideSelection3D, "H"),
         (ShortcutActions.ShowAll3D, "Alt+H"),
-        (ShortcutActions.TogglePlayer3D, "")
+        (ShortcutActions.TogglePlayer3D, ""),
+        (ShortcutActions.FullScreen3D, "F11")
     ];
 
     private static (string Id, string Bindings)[] UnityRows() =>
@@ -275,7 +279,8 @@ public static class ShortcutPresets
         (ShortcutActions.ToggleTree3D, ""),
         (ShortcutActions.HideSelection3D, ""),
         (ShortcutActions.ShowAll3D, ""),
-        (ShortcutActions.TogglePlayer3D, "")
+        (ShortcutActions.TogglePlayer3D, ""),
+        (ShortcutActions.FullScreen3D, "F11")
     ];
 
     private static (string Id, string Bindings)[] MayaRows() =>
@@ -316,7 +321,8 @@ public static class ShortcutPresets
         (ShortcutActions.ToggleTree3D, ""),
         (ShortcutActions.HideSelection3D, "Ctrl+H"),
         (ShortcutActions.ShowAll3D, ""),
-        (ShortcutActions.TogglePlayer3D, "")
+        (ShortcutActions.TogglePlayer3D, ""),
+        (ShortcutActions.FullScreen3D, "F11")
     ];
 
     private static (string Id, string Bindings)[] UnrealRows() =>
@@ -357,7 +363,8 @@ public static class ShortcutPresets
         (ShortcutActions.ToggleTree3D, ""),
         (ShortcutActions.HideSelection3D, "H"),
         (ShortcutActions.ShowAll3D, "Ctrl+H"),
-        (ShortcutActions.TogglePlayer3D, "")
+        (ShortcutActions.TogglePlayer3D, ""),
+        (ShortcutActions.FullScreen3D, "F11")
     ];
 
     /** Parses one table; a bad row is skipped at run time and reported when problems is set. */

@@ -1,5 +1,6 @@
 using ImGuiNET;
 using SunriseStudio.Packages;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -22,7 +23,7 @@ public sealed partial class StudioForm
         if (!ImGui.BeginPopupModal("Disk cache", ImGuiWindowFlags.AlwaysAutoResize)) return;
         bool enabled = settings.DiskCacheEnabled;
         int limit = settings.DiskCacheLimitMiB;
-        bool toggled = ImGui.Checkbox("Cache package loads", ref enabled);
+        bool toggled = StudioControls.Checkbox("Cache package loads", ref enabled);
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Used the next time Sunrise is opened");
         ImGui.SetNextItemWidth(230 * scale);
         bool moved = ImGui.SliderInt("Limit", ref limit, 128, 4096, "%d MiB");

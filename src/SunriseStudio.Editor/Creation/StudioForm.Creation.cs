@@ -183,7 +183,7 @@ public sealed partial class StudioForm
         if (!workspace.IsBusy && workspace.TakeWeaponArmsExportRequest() is { } arms)
             SaveFile("glTF binary|*.glb", "first-person-arms.glb", path => workspace.Execute("Exporting first-person arms",
                 () => WeaponArmsRig.Export(workspace.Catalog!, [("fire", arms.Fire), ("reload", arms.Reload)], path)));
-        creation.Draw(workspace, scale, PickFile, AdoptCreation);
+        creation.Draw(workspace, scale, icons, PickFile, AdoptCreation);
     }
 
     /** Opens what a finished workflow names, once the workspace is idle. */

@@ -251,7 +251,7 @@ public sealed partial class MissionGraphPage
         DrawNewScript(workspace);
         ImGui.BeginDisabled(catalog is null);
         ImGui.SetNextItemWidth(combo);
-        if (ImGui.BeginCombo("##mission-script", home == ScriptHome.Installed && script is not null ? script.Name : "Installed scripts"))
+        if (StudioControls.BeginCombo("##mission-script", home == ScriptHome.Installed && script is not null ? script.Name : "Installed scripts"))
         {
             if (catalog is { Scripts.Count: 0 })
                 ImGui.TextDisabled(Directory.Exists(catalog.ScriptsRoot) ? "No installed scripts" : "No scripts folder in this installation");
@@ -270,7 +270,7 @@ public sealed partial class MissionGraphPage
         Flow(combo);
         ImGui.BeginDisabled(project is null);
         ImGui.SetNextItemWidth(combo);
-        if (ImGui.BeginCombo("##project-missions", home == ScriptHome.Project && script is not null ? script.Name : "Mod scripts"))
+        if (StudioControls.BeginCombo("##project-missions", home == ScriptHome.Project && script is not null ? script.Name : "Mod scripts"))
         {
             if (ImGui.IsWindowAppearing()) { projectScripts = []; Try(() => projectScripts = MissionProject.List(project!)); }
             if (projectScripts.Count == 0) ImGui.TextDisabled("This project has no mod scripts");

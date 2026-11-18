@@ -23,33 +23,40 @@ public static class SceneLayerMenu
      */
     public static void Draw(SceneVisibility visibility, IReadOnlySet<SceneLayer>? present = null, AssetViewport? collision = null)
     {
-        if (!ImGui.BeginTable("layer-choices", 3, ImGuiTableFlags.SizingFixedFit)) return;
-        ImGui.TableSetupColumn("Kind");
-        ImGui.TableSetupColumn("Box");
-        ImGui.TableSetupColumn("Content");
-        ImGui.TableHeadersRow();
-        foreach (var (layer, box, content) in LayerKinds)
+        // Close rows on a striped table, each switch centred under its heading.
+        CompactFrames.Push();
+        if (ImGui.BeginTable("layer-choices", 3, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg))
         {
-            if (present is not null && !present.Contains(layer)) continue;
-            if (layer == SceneLayer.Collision && collision is null) continue;
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn(); ImGui.TextUnformatted(layer.ToString());
-            if (layer == SceneLayer.Collision)
+            ImGui.TableSetupColumn("Kind");
+            ImGui.TableSetupColumn("Box");
+            ImGui.TableSetupColumn("Content");
+            ImGui.TableHeadersRow();
+            foreach (var (layer, box, content) in LayerKinds)
             {
+                if (present is not null && !present.Contains(layer)) continue;
+                if (layer == SceneLayer.Collision && collision is null) continue;
+                ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                bool boxes = visibility.ShowCollisionBoxes;
-                if (ImGui.Checkbox("##box-Collision", ref boxes)) visibility.ShowCollisionBoxes = boxes;
-                ImGui.TableNextColumn();
-                bool shown = visibility.ShowCollisionContent;
-                if (ImGui.Checkbox("##content-Collision", ref shown)) visibility.ShowCollisionContent = shown;
-                continue;
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted(layer.ToString());
+                if (layer == SceneLayer.Collision)
+                {
+                    NextSwitch();
+                    bool boxes = visibility.ShowCollisionBoxes;
+                    if (StudioControls.Checkbox("##box-Collision", ref boxes)) visibility.ShowCollisionBoxes = boxes;
+                    NextSwitch();
+                    bool shown = visibility.ShowCollisionContent;
+                    if (StudioControls.Checkbox("##content-Collision", ref shown)) visibility.ShowCollisionContent = shown;
+                    continue;
+                }
+                NextSwitch(box); if (box) Choice(visibility, layer, $"##box-{layer}", visibility.HiddenOverlayLayers);
+                NextSwitch(content); if (content) Choice(visibility, layer, $"##content-{layer}", visibility.HiddenGeometryLayers);
             }
-            ImGui.TableNextColumn(); if (box) Choice(visibility, layer, $"##box-{layer}", visibility.HiddenOverlayLayers);
-            ImGui.TableNextColumn(); if (content) Choice(visibility, layer, $"##content-{layer}", visibility.HiddenGeometryLayers);
+            ImGui.EndTable();
         }
-        ImGui.EndTable();
+        ImGui.Separator();
         bool inactiveParts = visibility.ShowInactiveParts;
-        if (ImGui.Checkbox("Inactive parts", ref inactiveParts)) visibility.ShowInactiveParts = inactiveParts;
+        if (StudioControls.Checkbox("Inactive parts", ref inactiveParts)) visibility.ShowInactiveParts = inactiveParts;
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show parts that start hidden or have no material");
         if (collision is not null && (present is null || present.Contains(SceneLayer.Collision))) DrawCollisionOptions(collision);
         if (collision is { Scene.NavMeshes: [var navMesh, ..] } && (present is null || present.Contains(SceneLayer.NavMesh)))
@@ -57,8 +64,22 @@ public static class SceneLayerMenu
             // Each layer is baked for the agent radius its firing point layer stores.
             string radii = string.Concat(navMesh.FiringPoints.Layers.Select(layer => $"{layer.Agent[0]:0.##} m\0"));
             int agent = collision.NavMeshAgent;
-            if (ImGui.Combo("Nav mesh radius", ref agent, radii)) collision.NavMeshAgent = agent;
+            ImGui.Separator();
+            ImGui.SetNextItemWidth(ImGui.GetFontSize() * 6);
+            if (StudioControls.Combo("Nav mesh radius", ref agent, radii)) collision.NavMeshAgent = agent;
         }
+        CompactFrames.Pop();
+    }
+
+    /**
+     * Moves to the next column and centres the checkbox that follows. A cell with no switch leaves the cursor alone,
+     * since ImGui refuses a moved cursor that no item follows.
+     */
+    private static void NextSwitch(bool follows = true)
+    {
+        ImGui.TableNextColumn();
+        if (follows)
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (ImGui.GetColumnWidth() - StudioControls.BoxWidth) / 2));
     }
 
     /** Edge and solid switches, and what the collision layer holds or why it is empty. */
@@ -66,17 +87,17 @@ public static class SceneLayerMenu
     {
         ImGui.Separator();
         bool edges = viewport.CollisionEdges, solid = viewport.CollisionSolid;
-        if (ImGui.Checkbox("Collision edges", ref edges)) viewport.CollisionEdges = edges;
-        if (ImGui.Checkbox("Solid collision", ref solid)) viewport.CollisionSolid = solid;
+        if (StudioControls.Checkbox("Collision edges", ref edges)) viewport.CollisionEdges = edges;
+        if (StudioControls.Checkbox("Solid collision", ref solid)) viewport.CollisionSolid = solid;
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Opaque faces that hide what is behind them; triggers stay translucent");
         bool inactive = viewport.ShowInactiveCollision;
-        if (ImGui.Checkbox("Inactive bodies", ref inactive)) viewport.ShowInactiveCollision = inactive;
+        if (StudioControls.Checkbox("Inactive bodies", ref inactive)) viewport.ShowInactiveCollision = inactive;
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show bodies that start disabled");
         foreach (var role in Enum.GetValues<CollisionRole>())
         {
             bool shown = !viewport.HiddenCollisionRoles.Contains(role);
             if (role != default) ImGui.SameLine();
-            if (ImGui.Checkbox($"{role}##collision-role", ref shown))
+            if (StudioControls.Checkbox($"{role}##collision-role", ref shown))
             { if (shown) viewport.HiddenCollisionRoles.Remove(role); else viewport.HiddenCollisionRoles.Add(role); }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip(role switch
@@ -109,7 +130,7 @@ public static class SceneLayerMenu
     {
         ImGui.PushID(label);
         bool visible = !hidden.Contains(layer) && !visibility.HiddenLayers.Contains(layer);
-        if (ImGui.Checkbox(label, ref visible))
+        if (StudioControls.Checkbox(label, ref visible))
         {
             visibility.HiddenLayers.Remove(layer);
             if (visible) hidden.Remove(layer); else hidden.Add(layer);

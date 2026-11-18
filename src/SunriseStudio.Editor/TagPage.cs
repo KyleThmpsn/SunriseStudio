@@ -8,6 +8,7 @@ using SunriseStudio.Tags.Document;
 using SunriseStudio.Tags.Editing;
 using SunriseStudio.Tags.Graph;
 using SunriseStudio.Tags.Query;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -143,7 +144,7 @@ public sealed class TagPage : IStudioPage
             ImGuiInputTextFlags.EnterReturnsTrue);
         StudioUi.Tip("Text filters the fields by name, value, note or string hash.\nA query starting with ., @ or ##0x runs on Enter.");
         ImGui.SameLine();
-        ImGui.Checkbox("Changed", ref changedOnly);
+        StudioControls.Checkbox("Changed", ref changedOnly);
         StudioUi.Tip("Show only fields that differ from the installed original.");
         string text = search.Trim();
         bool isQuery = text.StartsWith('.') || BrowserRowFilter.IsQuery(text);
@@ -396,7 +397,7 @@ public sealed class TagPage : IStudioPage
         {
             bool set = (bits >> bit & 1) != 0;
             if (bit % 8 != 0) ImGui.SameLine();
-            if (!ImGui.Checkbox($"##bit{bit}", ref set)) continue;
+            if (!StudioControls.Checkbox($"##bit{bit}", ref set)) continue;
             ulong value = set ? bits | 1UL << bit : bits & ~(1UL << bit);
             string hex = Convert.ToHexString(BitConverter.GetBytes(value), 0, row.Size);
             Apply(workspace, () => TagFieldEdits.SetValue(document.Bytes, row, hex), $"Edited {row.Path}");

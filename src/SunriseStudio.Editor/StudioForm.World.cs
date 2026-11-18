@@ -29,6 +29,23 @@ public sealed partial class StudioForm
                 selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None) != 0;
     }
 
+    /** A world's tooltip with its bubbles listed. */
+    private void DrawWorldTip(uint tag, string name, string kind, IReadOnlyCollection<uint> bubbles) =>
+        AssetTooltip.DrawWorld(tag, name, kind, InvestmentTableViews.Count(bubbles.Count, "bubble"),
+            [.. bubbles.Select(BubbleLine)]);
+
+    /**
+     * A bubble by the name the game shows for it, then in brackets its technical name, or its name hash where none
+     * is known, so bubbles that share a shown name can be told apart.
+     */
+    private string BubbleLine(uint hash)
+    {
+        string code = workspace.Names?.HashCandidates(hash) is [var first, ..] ? first.Text : $"{hash:X8}";
+        // A shown name that is the technical one already carries it.
+        return workspace.ResolveHash(hash) is not { } shown ? code
+            : shown.StartsWith(code, StringComparison.Ordinal) ? shown : $"{shown} ({code})";
+    }
+
     /** Maps by name; choosing the open map only shows its scene. */
     private unsafe void DrawMapBrowser()
     {
@@ -53,7 +70,8 @@ public sealed partial class StudioForm
                     focusWorldScene = true;
                 }
                 ImGui.EndDisabled();
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{label}\n{map.BubbleHashes.Count} bubbles\n{map.Tag:X8}");
+                if (ImGui.IsItemHovered())
+                    DrawWorldTip(map.Tag, label, "Map", map.BubbleHashes);
                 ImGui.PopID();
             }
         clipper.End(); clipper.Destroy();
@@ -93,7 +111,8 @@ public sealed partial class StudioForm
                     focusWorldScene = true;
                 }
                 ImGui.EndDisabled();
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{label}\n{mission.BubbleHashes.Count} bubbles\n{mission.Tag:X8}");
+                if (ImGui.IsItemHovered())
+                    DrawWorldTip(mission.Tag, label, "Mission", mission.BubbleHashes);
                 ImGui.PopID();
             }
         clipper.End(); clipper.Destroy();
@@ -169,35 +188,46 @@ public sealed partial class StudioForm
             + ImGui.GetStyle().ItemInnerSpacing.X;
         bool treeVisible = settings.ShowSceneTree;
         if (ImGuiIcons.Toggle("scene-tree", StudioIcon.Tree, "Object tree", ref treeVisible)) settings.ShowSceneTree = treeVisible;
-        Next(150 * scale);
-        ImGui.SetNextItemWidth(150 * scale);
-        if (ImGui.BeginCombo("##bubbleVisibility", "Bubbles", ImGuiComboFlags.HeightLarge))
-        {
-            if (ImGui.Selectable("Show all")) hiddenBubbles.Clear();
-            foreach (var bubble in world.Scene.Bubbles.GroupBy(bubble => world.CanonicalBubble(bubble.TagHash)).Select(group => group.First()))
-            {
-                uint canonical = world.CanonicalBubble(bubble.TagHash);
-                bool visible = !hiddenBubbles.Contains(canonical);
-                string name = BubbleTitle(canonical, bubble.Name);
-                if (ImGui.Checkbox($"{name}##{canonical:X8}", ref visible))
-                { if (visible) hiddenBubbles.Remove(canonical); else hiddenBubbles.Add(canonical); }
-            }
-            ImGui.EndCombo();
-        }
-        Next(130 * scale);
-        ImGui.SetNextItemWidth(130 * scale);
-        if (ImGui.BeginCombo("##layerVisibility", "Layers"))
-        {
-            SceneLayerMenu.Draw(viewport!.Visibility, null, viewport);
-            ImGui.EndCombo();
-        }
+        Next(BubbleMenuWidth);
+        DrawBubbleMenu(world);
+        Next(LayerMenuWidth);
+        DrawLayerMenu();
         if (world.MissionTag is not null)
         {
-            Next(CheckWidth("Map")); ImGui.Checkbox("Map", ref showMap);
-            Next(CheckWidth("Mission")); ImGui.Checkbox("Mission", ref showMission);
+            Next(CheckWidth("Map")); StudioControls.Checkbox("Map", ref showMap);
+            Next(CheckWidth("Mission")); StudioControls.Checkbox("Mission", ref showMission);
         }
         if (isolatedObject is not null)
         { Next(ImGui.CalcTextSize("Show all").X + ImGui.GetStyle().FramePadding.X * 2); if (ImGui.Button("Show all")) isolatedObject = null; }
+    }
+
+    private float BubbleMenuWidth => 150 * scale;
+    private float LayerMenuWidth => 130 * scale;
+
+    /** The menu that shows or hides each bubble. */
+    private void DrawBubbleMenu(WorldDocument world)
+    {
+        ImGui.SetNextItemWidth(BubbleMenuWidth);
+        if (!StudioControls.BeginCombo("##bubbleVisibility", "Bubbles", ImGuiComboFlags.HeightLarge)) return;
+        if (ImGui.Selectable("Show all")) hiddenBubbles.Clear();
+        foreach (var bubble in world.Scene.Bubbles.GroupBy(bubble => world.CanonicalBubble(bubble.TagHash)).Select(group => group.First()))
+        {
+            uint canonical = world.CanonicalBubble(bubble.TagHash);
+            bool visible = !hiddenBubbles.Contains(canonical);
+            string name = BubbleTitle(canonical, bubble.Name);
+            if (StudioControls.Checkbox($"{name}##{canonical:X8}", ref visible))
+            { if (visible) hiddenBubbles.Remove(canonical); else hiddenBubbles.Add(canonical); }
+        }
+        ImGui.EndCombo();
+    }
+
+    /** The menu of the scene view's layers. */
+    private void DrawLayerMenu()
+    {
+        ImGui.SetNextItemWidth(LayerMenuWidth);
+        if (!StudioControls.BeginCombo("##layerVisibility", "Layers", ImGuiComboFlags.HeightLargest)) return;
+        SceneLayerMenu.Draw(viewport!.Visibility, null, viewport);
+        ImGui.EndCombo();
     }
 
     private void DrawWorldHierarchy() => DrawObjectTree("browser-tree");

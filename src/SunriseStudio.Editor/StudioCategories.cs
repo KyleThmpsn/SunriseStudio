@@ -34,8 +34,7 @@ public static partial class StudioCategories
     private static StudioCategory[] all = [];
     private static Dictionary<string, StudioCategory> byName = new(StringComparer.Ordinal);
     private static Func<PackageEntry, StudioCategoryMatch?>[] testRules = [];
-    // Icon art from the game's own menus, drawn by the home view in place of a category's Icon. No installed table maps a
-    // category to its art, so each is chosen by hand; one that does not read falls back to the vector Icon.
+    // Game menu art drawn in place of a category's Icon, picked by hand since no table maps it; a failed read keeps the Icon.
     internal static readonly IReadOnlyDictionary<string, uint> IconTags = new Dictionary<string, uint>(StringComparer.Ordinal)
     {
         [InvestmentItemKinds.Weapons] = 0x8132E4A0, [InvestmentItemKinds.Armor] = 0x80BA206F,

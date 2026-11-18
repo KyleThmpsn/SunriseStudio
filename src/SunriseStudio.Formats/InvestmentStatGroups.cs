@@ -7,9 +7,6 @@ using SunriseStudio.Tags.Views;
 
 namespace SunriseStudio.Formats;
 
-/** One stat a display group shows; a numeric stat shows its value with no bar. */
-public readonly record struct InvestmentGroupStat(byte Stat, bool Numeric);
-
 /** Display stat groups are shared by many items, so one item's curve change gets its own group. */
 public static class InvestmentStatGroups
 {
@@ -22,10 +19,6 @@ public static class InvestmentStatGroups
     private static readonly int SpareField = TagView.FieldOffset<SStatGroup>(nameof(SStatGroup.SpareArray));
     private static readonly int CurveField = TagView.FieldOffset<SStatGroupRow>(nameof(SStatGroupRow.DisplayCurve));
     private static readonly int DisplayStatField = TagView.FieldOffset<ItemDisplayStrings>(nameof(ItemDisplayStrings.TalentGridItemBlock));
-    // The registry names neither field: a group's i32 full-bar value follows its spare array, and a stat row's byte after
-    // its stat index is 1 when the stat shows as a number with no bar.
-    private static readonly int MaximumField = SpareField + TagArray.FieldSize;
-    private static readonly int NumericField = TagView.FieldOffset<SStatGroupRow>(nameof(SStatGroupRow.StatIndex)) + 1;
     // The native group index is a signed byte checked against the table's row count.
     public const int MaximumGroups = 128;
 
@@ -37,9 +30,6 @@ public static class InvestmentStatGroups
         return Enumerable.Range(0, groups.Count).Select(index => GroupHash(table.Span, groups.Data, index)).ToArray();
     }
 
-    /** Whether the display declares how its stats show. Gear, Ghosts, vehicles and emblems do; plugs do not. */
-    public static bool HasStatBlock(ReadOnlyMemory<byte> display) => StatBlock(display.Span) >= 0;
-
     /**
      * The display's stat group, or null when it has no stat block or no group.
      * A stat block pointer that leaves the tag throws.
@@ -47,36 +37,12 @@ public static class InvestmentStatGroups
     public static int? ReadDisplayGroup(ReadOnlyMemory<byte> display)
     {
         var span = display.Span;
-        int block = StatBlock(span);
-        if (block < 0) return null;
+        if (!TagView.FitsThrough<ItemDisplayStrings>(span, 0, nameof(ItemDisplayStrings.TalentGridItemBlock))) return null;
+        int block = TagPointer.Checked(span, DisplayStatField);
+        if (block < 4 || !TagView.Fits<SItemDisplayStatBlock>(span, block)
+            || TagView.ClassAt(span, block) != SItemDisplayStatBlock.Class) return null;
         byte group = TagView.At<SItemDisplayStatBlock>(span, block).StatGroupIndex;
         return group == byte.MaxValue ? null : group;
-    }
-
-    /** Where the display's stat block starts, or -1 when it has none. A stat block pointer that leaves the tag throws. */
-    private static int StatBlock(ReadOnlySpan<byte> display)
-    {
-        if (!TagView.FitsThrough<ItemDisplayStrings>(display, 0, nameof(ItemDisplayStrings.TalentGridItemBlock))) return -1;
-        int block = TagPointer.Checked(display, DisplayStatField);
-        return block >= 4 && TagView.Fits<SItemDisplayStatBlock>(display, block)
-            && TagView.ClassAt(display, block) == SItemDisplayStatBlock.Class ? block : -1;
-    }
-
-    /** The stats a group shows in the game's order, and the value a full bar stands for; zero names none. */
-    public static (int Maximum, IReadOnlyList<InvestmentGroupStat> Stats) ReadGroup(ReadOnlyMemory<byte> table, int group)
-    {
-        var span = table.Span;
-        var groups = TagArray.Checked(span, GroupsField, GroupClass, GroupStride);
-        if (group < 0 || group >= groups.Count) throw new InvalidDataException("The stat group is outside the table.");
-        int row = groups.Data + group * GroupStride;
-        var rows = TagArray.Checked(span, row + StatsField, StatClass, StatStride);
-        var stats = new InvestmentGroupStat[rows.Count];
-        for (int index = 0; index < rows.Count; index++)
-        {
-            int stat = rows.Data + index * StatStride;
-            stats[index] = new(TagView.At<SStatGroupRow>(span, stat).StatIndex, TagRead.U8(span, stat + NumericField) == 1);
-        }
-        return (TagRead.I32(span, row + MaximumField), stats);
     }
 
     /** An item display selects its stat group by the group byte of its stat block. */

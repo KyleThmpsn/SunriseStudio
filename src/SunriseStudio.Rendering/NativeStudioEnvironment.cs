@@ -16,8 +16,8 @@ public sealed class NativeStudioEnvironment : IDisposable
 {
     public const string Policy = "Asset previews reflect a viewer studio: brighter above than below and a softbox toward"
         + " the key light, blurred to a flat level by roughness. It is viewer lighting, not a game environment."
-        + " The key light, ambient and exposure levels are tuned by eye. May be inaccurate.";
-    // Assumed, tuned by eye: the roughest mips' flat level, below the map viewer's 0.18 so the key lights the model.
+        + " Its key light, ambient and exposure are viewer choices.";
+    // Viewer choice: the roughest mips' flat level, below the map viewer's 0.18 so the key lights the model.
     private const float FlatRadiance = .054f;
     // The shader's studio is authored around a flat level of 0.32, scaled to FlatRadiance.
     private const float AuthoredFlat = .32f;

@@ -38,6 +38,22 @@ public static class InvestmentCollections
         return -1;
     }
 
+    /** The item index of each node's collectibles, node by node; a collectible outside the table is left out. */
+    public static IReadOnlyList<IReadOnlyList<int>> NodeItems(ReadOnlyMemory<byte> collectibles,
+        IEnumerable<InvestmentCollectionNode> nodes)
+    {
+        var rows = TableRows.Of<CollectibleTable, CollectibleRow>(collectibles.Span);
+        var result = new List<IReadOnlyList<int>>();
+        foreach (var node in nodes)
+        {
+            var items = new List<int>(node.Collectibles.Count);
+            foreach (int row in node.Collectibles)
+                if ((uint)row < (uint)rows.Length) items.Add(rows[row].ItemIndex);
+            result.Add(items);
+        }
+        return result;
+    }
+
     /**
      * Reads every node under the Collections root that lists collectibles.
      * @param name Resolves a {bank, hash} string pair from the node display table.

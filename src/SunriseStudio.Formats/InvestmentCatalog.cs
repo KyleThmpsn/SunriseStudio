@@ -13,7 +13,8 @@ public sealed record InvestmentSources(uint Items = InvestmentTags.ItemIndex, ui
     uint VendorDisplays = InvestmentTags.VendorDisplayIndex, uint PlugSets = 0x81319349, uint Icons = 0x81A291C2,
     uint Perks = 0x81613D28, uint StatGroups = 0x81613D08, uint Collectibles = 0x81327CDE,
     uint CollectibleDisplays = 0x81327D67, uint PresentationNodes = 0x8131933F, uint PresentationNodeDisplays = 0x81613CF8,
-    uint ItemArt = InvestmentItemArt.TableTag, uint Root = 0, uint ObjectiveDisplays = 0, uint PowerCaps = 0x8131933D);
+    uint ItemArt = InvestmentItemArt.TableTag, uint Root = 0, uint ObjectiveDisplays = 0, uint PowerCaps = 0x8131933D,
+    uint BucketDisplays = 0x81327D71, uint SocketCategoryDisplays = 0x81613D05);
 public sealed record InvestmentItem(int Index, uint Hash, uint Tag, uint DisplayTag, string Name,
     string TypeName, string Description, byte Bucket, byte Tier, int MaximumStack, bool Instanced)
 {
@@ -29,7 +30,15 @@ public sealed record InvestmentStat(byte Index, string Name, int Value, AssetPro
     bool Conditional = false, bool Computed = false);
 public sealed record InvestmentStatDefinition(byte Index, string Name);
 public sealed record InvestmentSocket(int Index, ushort Type, ushort InitialPlug, string PlugName,
-    AssetProperty TypeField, AssetProperty PlugField, IReadOnlyList<ushort> AllowedPlugs);
+    AssetProperty TypeField, AssetProperty PlugField, IReadOnlyList<ushort> AllowedPlugs)
+{
+    /** The reusable plug set's members in table order; with the embedded plugs, what the item comes with. */
+    public IReadOnlyList<ushort> ReusablePlugs { get; init; } = [];
+    /** The randomized plug set's members in table order, the pool a roll picks from. */
+    public IReadOnlyList<ushort> RandomizedPlugs { get; init; } = [];
+    /** The randomized plug set's row in the plug set table and its hash; -1 and 0 for none. */
+    public (int Index, uint Hash) RandomizedSet { get; init; } = (-1, 0);
+}
 public sealed record InvestmentPerk(ushort Index, string Name, AssetProperty Field, bool Conditional = false);
 public sealed record InvestmentPerkDefinition(int Index, uint Hash, string Name, string Description, ushort IconIndex);
 public sealed record InvestmentItemDetail(InvestmentItem Item, IReadOnlyList<InvestmentStat> Stats,
@@ -37,6 +46,8 @@ public sealed record InvestmentItemDetail(InvestmentItem Item, IReadOnlyList<Inv
     IReadOnlyList<AssetProperty> Fields, IReadOnlyList<string> Diagnostics)
 {
     public IReadOnlyDictionary<byte, InvestmentStatCurve> DisplayCurves { get; init; } = new Dictionary<byte, InvestmentStatCurve>();
+    /** Null when the item's display has no stat block or it does not read. */
+    public InvestmentStatGroup? StatGroup { get; init; }
     public InvestmentPursuit? Pursuit { get; init; }
 }
 public sealed record InvestmentCost(ushort ItemIndex, string Name, uint Quantity, AssetProperty ItemField,
@@ -101,7 +112,44 @@ public sealed partial class InvestmentCatalog
     public string ItemName(int index) => index == ushort.MaxValue ? "None" : index >= 0 && index < Items.Count
         ? Items[index].Name : $"Item {index}";
     public string StatName(byte index) => statNames.GetValueOrDefault(index, $"Stat {index}");
-    /** Resolves a {bank index, string hash} pair through the bank index. */
+    /**
+     * In a bucket or socket category display row, which leads with the row's hash, the u16 after the hash is the string
+     * bank of the name whose hash the next named field holds. The registry names neither.
+     */
+    private const int NameBankAfterHash = sizeof(uint);
+    private string[]? bucketNames, socketCategoryNames;
+
+    /** Bungie's name for an inventory bucket by its native id; empty when it has none. */
+    public string BucketName(byte bucket) => DisplayNameAt(bucketNames ??= DisplayNames<C80805ad9, C80805add>(
+        sources.BucketDisplays, C80805ad9.Class, nameof(C80805add.Unk0), nameof(C80805add.Unk8)), bucket);
+
+    /** Bungie's name for a socket category by its row in the category table, as the game writes it; empty when it has none. */
+    public string SocketCategoryName(int category) => DisplayNameAt(socketCategoryNames ??= DisplayNames<C80805953, C80805957>(
+        sources.SocketCategoryDisplays, C80805953.Class, nameof(C80805957.Unk0), nameof(C80805957.Unk8)), category);
+
+    private static string DisplayNameAt(string[] names, int index) => index >= 0 && index < names.Length ? names[index] : "";
+
+    /**
+     * Each row's name, read once; empty when the table is missing or of another class.
+     * @param hash The row member that holds the row's hash.
+     * @param name The row member that holds the name's string hash.
+     */
+    private string[] DisplayNames<TTable, TRow>(uint tag, uint expected, string hash, string name)
+        where TTable : unmanaged where TRow : unmanaged
+    {
+        if (!catalog.TryGetEntry(tag, out var entry) || entry.Reference != expected) return [];
+        byte[] data = catalog.Read(tag);
+        int stride = Unsafe.SizeOf<TRow>();
+        var rows = TagArray.Checked(data, TagView.FieldOffset<TTable>("Table"), stride: stride);
+        int bank = TagView.FieldOffset<TRow>(hash) + NameBankAfterHash, text = TagView.FieldOffset<TRow>(name);
+        var names = new string[rows.Count];
+        for (int row = 0; row < rows.Count; row++)
+        {
+            int at = rows.Data + row * stride;
+            names[row] = Text(TagRead.U16(data, at + bank), TagRead.U32(data, at + text));
+        }
+        return names;
+    }    /** Resolves a {bank index, string hash} pair through the bank index. */
     public string Text(uint bank, uint hash) => bank < banks.Length ? strings.Get(banks[bank], hash)?.Trim() ?? "" : "";
     /** Collections pages that list collectibles, read from the current package bytes. */
     public IReadOnlyList<InvestmentCollectionNode> CollectionNodes() => InvestmentCollections.ReadNodes(

@@ -36,6 +36,12 @@ public sealed unsafe class ImGuiController : IDisposable
     private static readonly IntPtr TextRanges = Ranges(0x0020, 0x017F, 0x2000, 0x206F);
     // The symbol face maps the glyphs installed strings embed across this private-use span.
     private static readonly IntPtr SymbolRanges = Ranges(0xE000, 0xEEFF);
+    // The icon face's bytes and the glyphs baked from it, in native memory the atlas reads whenever it builds.
+    private static IntPtr iconFace, iconRanges;
+    private static int iconFaceLength;
+    // Icons are baked a little above the body size, near the size buttons draw them.
+    private const float IconScale = 1.125f;
+    private ImFontPtr? icons;
     private ID3D11Buffer? vertices;
     private ID3D11Buffer? indices;
     private int vertexCapacity;
@@ -51,6 +57,18 @@ public sealed unsafe class ImGuiController : IDisposable
     public ImFontPtr TitleFont => owner?.TitleFont ?? title;
     /** Null until a game folder with the faces is set and the fonts are rebuilt. */
     public GameFonts? GameFonts => owner is null ? gameFonts : owner.GameFonts;
+    /** The icon face at the current size, or null when SetIconFace was never called. */
+    public ImFontPtr? IconFont => owner is null ? icons : owner.IconFont;
+
+    /** Gives every controller an icon face: a TTF's bytes and the glyphs to bake from it. Call before the first one. */
+    public static void SetIconFace(ReadOnlySpan<byte> face, IEnumerable<char> glyphs)
+    {
+        iconFace = (IntPtr)NativeMemory.Alloc((nuint)face.Length);
+        face.CopyTo(new Span<byte>((void*)iconFace, face.Length));
+        iconFaceLength = face.Length;
+        // Each glyph is a range of its own.
+        iconRanges = Ranges([.. glyphs.Distinct().Order().SelectMany(glyph => new[] { (ushort)glyph, (ushort)glyph })]);
+    }
     /** The game folder whose fonts folder supplies the game fonts; rebuild the fonts after setting it. */
     public string? GameRoot { get; set; }
     /** How much larger than the body the game fonts are baked; rebuild the fonts after setting it. */
@@ -108,11 +126,22 @@ public sealed unsafe class ImGuiController : IDisposable
         string? titleFace = File.Exists(titlePath) ? titlePath : fontPath is not null && File.Exists(fontPath) ? fontPath : null;
         title = titleFace is not null ? fonts.AddFontFromFileTTF(titleFace, fontSize * 1.4f) : fonts.AddFontDefault();
         gameFonts = GameRoot is null ? null : AddGameFonts(fonts, Path.Combine(GameRoot, "fonts"), fontSize * GameFontScale);
+        icons = iconFace == IntPtr.Zero ? null : AddIconFont(fonts, fontSize * IconScale);
+    }
+
+    /** The icon face from memory this class keeps, so the atlas must not free it when it clears. */
+    private static ImFontPtr AddIconFont(ImFontAtlasPtr fonts, float fontSize)
+    {
+        var config = ImGuiNative.ImFontConfig_ImFontConfig();
+        config->FontDataOwnedByAtlas = 0;
+        var font = fonts.AddFontFromMemoryTTF(iconFace, iconFaceLength, fontSize, config, iconRanges);
+        ImGuiNative.ImFontConfig_destroy(config);
+        return font;
     }
 
     /**
-     * The asset tooltip's faces from the game's fonts folder, never bundled: text at this size, the type line at 1.35,
-     * the name at 2.05 and the figure at 2.6 times it. Null when the folder lacks one.
+     * The tooltip's faces from the game's fonts, never bundled: text at this size, the type line 1.35, the name 2.05
+     * and the figure 2.6 times it. Null when one is missing.
      */
     private static GameFonts? AddGameFonts(ImFontAtlasPtr fonts, string folder, float fontSize)
     {

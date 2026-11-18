@@ -106,7 +106,10 @@ public sealed partial class StudioForm : Form
         Text = $"Sunrise Studio {StudioVersion.Text}";
         chrome = new(this);
         Icon = studioIcon = StudioBrand.CreateIcon();
-        ClientSize = new Size(1540, 960);
+        // Four fifths of the screen's height, at least 960, in a 16:10 shape that fits the screen.
+        var area = Screen.FromPoint(MousePosition).WorkingArea;
+        int height = Math.Min(area.Height, Math.Max(960, area.Height * 4 / 5));
+        ClientSize = new Size(Math.Min(area.Width, height * 8 / 5), height);
         MinimumSize = new Size(1100, 720);
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
@@ -165,19 +168,23 @@ public sealed partial class StudioForm : Form
         gui.RebuildFonts(BodyFontPath, 16 * scale);
         gui.MakeCurrent();
         StudioTheme.Apply(scale);
+        Creation.CreationWidgets.Scale = scale;
         missionGraph.CodeFont = gui.MonospaceFont;
+        ImGuiIcons.Font = gui.IconFont;
         foreach (var popout in popouts) popout.Rescale(scale);
     }
 
-    /** Rebuilds the fonts when another game opens, since the asset tooltip is set in that game's own faces. */
+    /** Rebuilds the fonts when another game opens: the asset tooltip and the loading title use that game's own faces. */
     private void ApplyGameFonts()
     {
-        string? root = workspace.Catalog?.GameRoot;
+        // Until an installation opens, the remembered one supplies the faces, so the first loading screen has them.
+        string? root = workspace.Catalog?.GameRoot ?? (settings.SunrisePath is { Length: > 0 } remembered ? remembered : null);
         if (gui is null || gui.GameRoot == root) return;
         gui.GameRoot = root; gui.GameFontScale = AssetTooltip.Zoom;
         gui.RebuildFonts(BodyFontPath, 16 * scale);
         gui.MakeCurrent();
         missionGraph.CodeFont = gui.MonospaceFont;
+        ImGuiIcons.Font = gui.IconFont;
     }
 
     /** The initial picker stays open until the chosen folder resolves to installed packages. */
@@ -189,9 +196,13 @@ public sealed partial class StudioForm : Form
             scale = Math.Max(1, DeviceDpi / 96f);
             renderer = new Dx11Renderer(Handle, ClientSize.Width, ClientSize.Height, options.Warp);
             loadingLogo = StudioBrand.CreateTexture(renderer);
+            ImGuiController.SetIconFace(StudioBrand.IconFace(), ImGuiIcons.GlyphSet);
             gui = new ImGuiController(renderer, this, BodyFontPath, 16 * scale);
             missionGraph.CodeFont = gui.MonospaceFont;
+            ImGuiIcons.Font = gui.IconFont;
             StudioTheme.Apply(scale);
+            // Widgets outside the creation dialog size by the same scale.
+            Creation.CreationWidgets.Scale = scale;
             viewport = new AssetViewport(renderer)
                 { UseGameShaders = settings.GameShaders, ShowGameShaderToggle = false, FullDetail = settings.FullDetail };
             assetViewport = new AssetViewport(renderer)
@@ -292,6 +303,13 @@ public sealed partial class StudioForm : Form
             ApplyGameFonts();
             // After both font rebuilds, so the tooltip never holds a font a rebuild freed.
             AssetTooltip.Prepare(workspace, icons, gui.GameFonts, scale);
+            // A controller flies whichever view the pointer was last over; its Start button toggles full screen.
+            Gamepad.Poll();
+            // The scene view offers Full Screen in its tool row while a map is open.
+            viewport!.FullScreenToggle = workspace.World is null ? null : () => BeginInvoke(ToggleFullScreen);
+            viewport.FullScreen = fullScreen is not null;
+            viewport.ToolbarTail = fullScreen is null ? null : DrawFullScreenBar;
+            if (Gamepad.Current.Menu && (workspace.World is not null || fullScreen is not null)) BeginInvoke(ToggleFullScreen);
             renderer.Resize(ClientSize.Width, ClientSize.Height);
             guiFrameActive = true;
             shownPage = null; shownRowPage = null;
@@ -567,6 +585,7 @@ public sealed partial class StudioForm : Form
     /** Menu shortcuts work anywhere; text input and the Shortcuts window suppress them. */
     private void HandleShortcuts()
     {
+        if (ShortcutInput.Pressed(ShortcutActions.FullScreen3D)) BeginInvoke(ToggleFullScreen);
         if (ShortcutInput.Pressed(ShortcutActions.NewProject)) projectDialog = true;
         if (ShortcutInput.Pressed(ShortcutActions.OpenProject)) OpenProjectDialog();
         if (ShortcutInput.Pressed(ShortcutActions.Undo)) UndoActive();
@@ -627,6 +646,12 @@ public sealed partial class StudioForm : Form
     /** Area layout is local; projects keep no window or machine preferences. */
     private void DrawEditor()
     {
+        if (ReferenceEquals(fullScreen, chrome))
+        {
+            DrawFullScreen(new(ClientSize.Width, ClientSize.Height), drawers: true);
+            DrawDialogs();
+            return;
+        }
         DrawMenu();
         float menu = ImGui.GetFrameHeight();
         float status = 27 * scale, toolbar = 42 * scale;
@@ -716,9 +741,19 @@ public sealed partial class StudioForm : Form
                 ImGui.Image(mark.ImGuiId, new(72 * scale));
                 ImGui.SetCursorPosX(28 * scale);
             }
-            ImGui.PushFont(gui!.TitleFont);
-            ImGui.TextColored(StudioTheme.Accent, "SUNRISE STUDIO");
-            ImGui.PopFont();
+            // The name is set in the game's face once an installation supplies it, as the loading screen sets it.
+            if (gui!.GameFonts?.Figure is { } face)
+            {
+                ImGui.GetWindowDrawList().AddText(face, NameHeight * scale, ImGui.GetCursorScreenPos(),
+                    ImGui.GetColorU32(ImGuiCol.Text), "SUNRISE STUDIO");
+                ImGui.Dummy(new(0, NameHeight * scale));
+            }
+            else
+            {
+                ImGui.PushFont(gui.TitleFont);
+                ImGui.TextColored(StudioTheme.Accent, "SUNRISE STUDIO");
+                ImGui.PopFont();
+            }
             ImGui.SetCursorPosX(28 * scale); ImGui.TextDisabled("Select an asset to begin");
             ImGui.Spacing();
             ImGui.SetCursorPosX(28 * scale);
@@ -839,7 +874,10 @@ public sealed partial class StudioForm : Form
                     shownRowPage?.ShowRow(wanted.Row);
                     pendingRow = null; linkedRow = true;
                 }
+                // The tab bar stays in place while the page scrolls below it.
+                ImGui.BeginChild("page-" + page.Id, Vector2.Zero);
                 page.Draw(context);
+                ImGui.EndChild();
                 ImGui.EndTabItem();
             }
         ImGui.EndTabBar();
@@ -860,7 +898,11 @@ public sealed partial class StudioForm : Form
     private void DrawStatus(Vector2 position, Vector2 size)
     {
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(12, 5) * scale);
+        // A step darker than the panels, with a top edge, so the bar reads as the window's frame.
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, StudioTheme.Canvas);
         BeginPanel("Status", position, size, ImGuiWindowFlags.NoScrollbar);
+        ImGui.PopStyleColor();
+        ImGui.GetWindowDrawList().AddLine(position, position + new Vector2(size.X, 0), ImGui.GetColorU32(ImGuiCol.Border));
         var line = ImGui.GetCursorPos();
         bool link = workspace.Catalog is not null;
         float linkStart = line.X + ImGui.GetContentRegionAvail().X - (link ? liveTab.StatusWidth() : 0);

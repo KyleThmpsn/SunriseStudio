@@ -344,7 +344,7 @@ public sealed class ExoticWeaponWorkflow : CreationWorkflow
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - ImGui.GetTextLineHeightWithSpacing());
         bool open = openSections.Contains(title);
         ImGui.SetNextItemOpen(open, ImGuiCond.Always);
-        if (ImGui.CollapsingHeader(title) == open) return;
+        if (StudioControls.CollapsingHeader(title) == open) return;
         if (open) openSections.Remove(title); else openSections.Add(title);
     }
 

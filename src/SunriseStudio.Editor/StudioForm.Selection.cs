@@ -87,11 +87,11 @@ public sealed partial class StudioForm
         if (selectedObject is SceneMarker { Effect: not null } effectMarker && workspace.World?.Scene is { } effectScene)
             DrawEffectControls(effectScene, effectMarker);
         ImGui.Spacing();
-        ImGui.Checkbox("Expand details", ref expandObjectDetails);
+        StudioControls.Checkbox("Expand details", ref expandObjectDetails);
         foreach (var group in inspection.Properties.GroupBy(property => property.Group))
         {
             if (expandObjectDetails) ImGui.SetNextItemOpen(true);
-            if (!ImGui.CollapsingHeader($"{group.Key}##property-group")) continue;
+            if (!StudioControls.CollapsingHeader($"{group.Key}##property-group")) continue;
             var facts = new List<(string, string, string)>();
             foreach (var property in group)
             {
@@ -101,7 +101,7 @@ public sealed partial class StudioForm
             }
             StudioUi.Facts($"property-facts-{group.Key}", facts);
         }
-        if (inspection.References.Count != 0 && ImGui.CollapsingHeader("References", ImGuiTreeNodeFlags.DefaultOpen))
+        if (inspection.References.Count != 0 && StudioControls.CollapsingHeader("References", ImGuiTreeNodeFlags.DefaultOpen))
             foreach (var reference in inspection.References)
             {
                 ImGui.PushID($"{reference.Name}:{reference.TagHash}:{reference.Offset}");
@@ -111,10 +111,10 @@ public sealed partial class StudioForm
                     : $"{reference.TagHash:X8} + {reference.Offset:X}");
                 ImGui.PopID();
             }
-        if (inspection.Slots.Count != 0 && ImGui.CollapsingHeader("Mission slots", ImGuiTreeNodeFlags.DefaultOpen))
+        if (inspection.Slots.Count != 0 && StudioControls.CollapsingHeader("Mission slots", ImGuiTreeNodeFlags.DefaultOpen))
             StudioUi.Facts("mission-slots", inspection.Slots.Select(slot => (
                 workspace.ResolveHash(slot.NameHash) ?? slot.Name, $"type {slot.Identity.Type}, slot {slot.Identity.Index}", "")));
-        if (inspection.RelatedObjects.Count != 0 && ImGui.CollapsingHeader("Related objects"))
+        if (inspection.RelatedObjects.Count != 0 && StudioControls.CollapsingHeader("Related objects"))
             foreach (var related in inspection.RelatedObjects)
                 if (inspectionWorld.Find(related) is { } relatedRow)
                 {
@@ -122,7 +122,7 @@ public sealed partial class StudioForm
                     if (ImGui.Selectable(relatedRow.Name)) SelectWorldObject(relatedRow);
                     ImGui.PopID();
                 }
-        if (row.Owners.Count != 0 && ImGui.CollapsingHeader("State ownership"))
+        if (row.Owners.Count != 0 && StudioControls.CollapsingHeader("State ownership"))
             foreach (var owner in row.Owners)
             {
                 var state = inspectionWorld.AllStates.FirstOrDefault(state => state.BubbleNameHash == owner.BubbleHash
@@ -155,7 +155,7 @@ public sealed partial class StudioForm
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(info.Reason);
             return;
         }
-        if (!ImGui.CollapsingHeader($"{info.CoordinateSpace} placement", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        if (!StudioControls.CollapsingHeader($"{info.CoordinateSpace} placement", ImGuiTreeNodeFlags.DefaultOpen)) return;
         ImGui.BeginDisabled(!workspace.CanEdit);
         if (info.CanTransform)
         {
@@ -280,7 +280,7 @@ public sealed partial class StudioForm
 
     private void DrawNameEvidence(uint tag)
     {
-        if (workspace.Names is not { } names || !ImGui.CollapsingHeader("Name source")) return;
+        if (workspace.Names is not { } names || !StudioControls.CollapsingHeader("Name source")) return;
         var info = names.Lookup(tag);
         var facts = new List<(string, string, string)>
         {

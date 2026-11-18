@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using SunriseStudio.Packages;
 using SunriseStudio.Tags.Generated;
 using SunriseStudio.Tags.Views;
@@ -21,12 +22,16 @@ public static class InvestmentAmmoType
     public static string Name(int ammo) => Valid(ammo) ? Names[ammo - 1] : "";
 
     /** The display's ammo type, 0 for none, or null when the display has no type record. */
-    public static int? ReadDisplay(ReadOnlySpan<byte> display)
+    public static int? ReadDisplay(ReadOnlySpan<byte> display) =>
+        TypeRecord(display) is { } record ? TagRead.U16(display, record) : null;
+
+    /** Where the display's type record starts, or null when it has none. */
+    private static int? TypeRecord(ReadOnlySpan<byte> display)
     {
         if (!TagView.FitsThrough<ItemDisplayStrings>(display, 0, nameof(ItemDisplayStrings.EquippingItemBlock))) return null;
         int record = TagPointer.TryChecked(display, TypeRecordField);
         return record >= 0 && record <= display.Length - sizeof(ushort) && TagView.ClassAt(display, record) == C80805d1a.Class
-            ? TagRead.U16(display, record) : null;
+            ? record : null;
     }
 
     /** An item's ammo type, or null when it has none or its display does not read. */
@@ -37,5 +42,14 @@ public static class InvestmentAmmoType
             return item.DisplayTag != 0 && ReadDisplay(packages.Read(item.DisplayTag)) is { } ammo && Valid(ammo) ? ammo : null;
         }
         catch (Exception error) when (error is InvalidDataException or KeyNotFoundException or OverflowException) { return null; }
+    }
+
+    /** The display with its type record's ammo type set. */
+    public static byte[] SetDisplay(ReadOnlySpan<byte> display, int ammo)
+    {
+        int record = TypeRecord(display) ?? throw new InvalidDataException("The weapon display has no ammo classification.");
+        byte[] output = display.ToArray();
+        BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(record), checked((ushort)ammo));
+        return output;
     }
 }

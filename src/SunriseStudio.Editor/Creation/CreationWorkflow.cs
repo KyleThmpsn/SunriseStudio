@@ -36,6 +36,16 @@ public abstract class CreationWorkflow
     /** Refreshes cached data between frames; runs before the fields are drawn. */
     public virtual void Update(StudioWorkspace workspace) { }
 
+    /** True when DrawLayout lays out the fields in place of the Required and Optional lists. */
+    public virtual bool HasLayout => false;
+
+    /**
+     * Draws the fields in the workflow's own layout; the dialog keeps the footer.
+     * @param pickFile Shows a file dialog for a filter and returns the chosen path.
+     */
+    public virtual void DrawLayout(StudioWorkspace workspace, InvestmentIconCache icons,
+        Action<string, Action<string>> pickFile) { }
+
     /** Problems beyond single fields; Create stays disabled while any remain. */
     protected virtual IEnumerable<string> Validate(StudioWorkspace workspace) => [];
 

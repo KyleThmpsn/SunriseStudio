@@ -7,6 +7,7 @@ using SunriseStudio.Packages;
 using SunriseStudio.Projects;
 using SunriseStudio.Tags.Generated;
 using SunriseStudio.Tags.Views;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -47,7 +48,7 @@ public sealed partial class CuiPage
         ImGui.SameLine();
         if (ImGui.Button("Frame widget")) focusComposed = true;
         ImGui.SameLine();
-        ImGui.Checkbox("Isolate", ref isolateComposed);
+        StudioControls.Checkbox("Isolate", ref isolateComposed);
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Preview the selected widget and its children");
         ImGui.SameLine();
         ImGui.BeginDisabled(!context.Workspace.CanEdit || structure is null);
@@ -67,7 +68,7 @@ public sealed partial class CuiPage
         if (ImGui.BeginPopup("cui-create-widget"))
         {
             string[] kinds = Enum.GetNames<CuiWidgetKind>();
-            if (ImGui.Combo("Type", ref widgetKind, kinds, kinds.Length)) widgetName = kinds[widgetKind];
+            if (StudioControls.Combo("Type", ref widgetKind, kinds, kinds.Length)) widgetName = kinds[widgetKind];
             ImGui.InputText("Name", ref widgetName, 80);
             ParentPicker("Parent", ref widgetParent);
             var position = new Vector2(widgetRectangle.X, widgetRectangle.Y);
@@ -110,7 +111,7 @@ public sealed partial class CuiPage
     {
         if (structure is null) return;
         int current = selected;
-        if (!ImGui.BeginCombo(label, structure.Parents.FirstOrDefault(node => node.Id == current) is { } parent ? StructureName(parent) : "Screen")) return;
+        if (!StudioControls.BeginCombo(label, structure.Parents.FirstOrDefault(node => node.Id == current) is { } parent ? StructureName(parent) : "Screen")) return;
         foreach (var node in structure.Parents)
         {
             ImGui.PushID(node.Id);

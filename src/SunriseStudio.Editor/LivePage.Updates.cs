@@ -3,6 +3,7 @@ using System.Numerics;
 using ImGuiNET;
 using SunriseStudio.Live;
 using SunriseStudio.Projects;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -32,7 +33,7 @@ public sealed partial class LivePage
     {
         bool mod = workspace.Project?.Mod is not null;
         ImGui.BeginDisabled(!mod);
-        ImGui.Checkbox("Live", ref liveUpdates);
+        StudioControls.Checkbox("Live", ref liveUpdates);
         ImGui.EndDisabled();
         StudioUi.Tip(mod ? "Push each saved change to the running game" : "Set the mod details first");
         ImGui.SameLine();

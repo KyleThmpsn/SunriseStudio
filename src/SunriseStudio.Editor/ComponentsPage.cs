@@ -89,7 +89,7 @@ public sealed partial class ComponentsPage : IStudioPage
             var sections = role.ToArray();
             ImGui.PushID(index++);
             if (sections.Length == 1) DrawSection(workspace, sections[0], role.Key, false);
-            else if (ImGui.CollapsingHeader($"{role.Key} ({sections.Length})###role"))
+            else if (StudioControls.CollapsingHeader($"{role.Key} ({sections.Length})###role"))
             {
                 ImGui.Indent();
                 for (int k = 0; k < sections.Length; k++)
@@ -107,7 +107,7 @@ public sealed partial class ComponentsPage : IStudioPage
     private void DrawSection(StudioWorkspace workspace, ComponentSection section, string label, bool nested)
     {
         string id = $"{label}###cfg{section.Config:X8}";
-        bool open = nested ? ImGui.TreeNodeEx(id, ImGuiTreeNodeFlags.NoTreePushOnOpen) : ImGui.CollapsingHeader(id);
+        bool open = nested ? ImGui.TreeNodeEx(id, ImGuiTreeNodeFlags.NoTreePushOnOpen) : StudioControls.CollapsingHeader(id);
         StudioUi.Tip($"{section.Name}\n0x{section.Config:X8}");
         if (!open) return;
         ImGui.Indent();

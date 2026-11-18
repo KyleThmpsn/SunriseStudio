@@ -27,11 +27,14 @@ public static class InvestmentSocketTypes
     private static readonly int WhitelistField = RowArrays[1];
     /** Root blob slot after the socket types; 4-byte rows of socket category hashes. */
     public const uint CategoryTable = 0x81319330;
-    // The registry names neither table's layout: the category table keeps its rows where the gameplay table does, and the
-    // second u16 after a gameplay row's hash is the socket type's row in the category table.
+    // Neither layout is named: category rows sit where gameplay rows do, indexed by the u16 after a gameplay row's hash.
     private static readonly int CategoryRowsField = GameplayRowsField,
         CategoryField = TagView.FieldOffset<SocketTypeRow>(nameof(SocketTypeRow.Unk0)) + sizeof(uint) + sizeof(ushort);
     private const int CategoryStride = sizeof(uint);
+    /** The masterwork byte, which the registry does not name: the fourth after a gameplay row's unlock expression. */
+    private const int MasterworkAfterExpression = 3;
+    private static readonly int MasterworkField = TagView.FieldOffset<SocketTypeRow>(nameof(SocketTypeRow.H0db6e645))
+        + Unsafe.SizeOf<RewardCondition>() + MasterworkAfterExpression;
     // The game's armor perks socket category, which holds an armor piece's stat roll and its traits.
     public const uint ArmorPerksCategory = 0x961B10E4;
 
@@ -54,6 +57,14 @@ public static class InvestmentSocketTypes
         var span = gameplay.Span;
         var rows = TagArray.Checked(span, GameplayRowsField, stride: GameplayStride);
         return index < 0 || index >= rows.Count ? null : TagRead.U16(span, rows.Data + index * GameplayStride + CategoryField);
+    }
+
+    /** True when the socket type holds a masterwork. */
+    public static bool Masterwork(ReadOnlyMemory<byte> gameplay, int index)
+    {
+        var span = gameplay.Span;
+        var rows = TagArray.Checked(span, GameplayRowsField, stride: GameplayStride);
+        return index >= 0 && index < rows.Count && TagRead.U8(span, rows.Data + index * GameplayStride + MasterworkField) != 0;
     }
 
     /** A socket type's socket category hash; null when the type or its category is outside its table. */

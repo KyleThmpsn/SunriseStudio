@@ -3,6 +3,7 @@ using ImGuiNET;
 using SunriseStudio.Formats;
 using SunriseStudio.Packages;
 using SunriseStudio.Tags.Generated;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -75,7 +76,7 @@ public sealed class SeasonPassPage : IStudioPage, IStudioRowPage
         ImGui.TextUnformatted("Season pass");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(ImGui.CalcTextSize("Progression 000" + InvestmentTableViews.Dot + "0000 rows").X + ImGui.GetFrameHeight() * 2);
-        if (ImGui.BeginCombo("##progression", Label(shown)))
+        if (StudioControls.BeginCombo("##progression", Label(shown)))
         {
             foreach (var candidate in tables.PassCandidates)
                 if (ImGui.Selectable(Label(candidate), candidate.Index == grid.Progression)) grid.Show(candidate.Index);
@@ -127,7 +128,7 @@ public sealed class SeasonPassPage : IStudioPage, IStudioRowPage
         for (int i = 0; i < conditions.Count; i++) facts.Add((i == 0 ? "Conditions" : "", conditions[i], conditionTip));
         if (row.Error.Length != 0) facts.Add(("Problem", row.Error, row.Error));
         StudioUi.Facts("pass-row", facts);
-        if (row.Sockets.Count != 0 && ImGui.CollapsingHeader($"Socket overrides ({row.Sockets.Count})###pass-sockets"))
+        if (row.Sockets.Count != 0 && StudioControls.CollapsingHeader($"Socket overrides ({row.Sockets.Count})###pass-sockets"))
             StudioUi.Facts("pass-sockets", row.Sockets.Select(socket =>
             {
                 var (text, tip) = InvestmentTableViews.SocketOverride(catalog, socket);

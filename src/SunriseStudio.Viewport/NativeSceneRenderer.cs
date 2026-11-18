@@ -254,10 +254,10 @@ public sealed partial class NativeSceneRenderer : IDisposable
     private NativeRenderTargets? antialiased;
     // The key in camera terms: right, up and toward the eye. Viewer choice.
     private static readonly Vector3 StudioKeyView = Vector3.Normalize(new(-.35f, .55f, .76f));
-    // Assumed values, tuned by eye: the key light in sun units and the ambient under it.
+    // Viewer choice: the key light in sun units and the ambient under it.
     private static readonly Vector4 StudioKeyColor = new(StudioKeyIntensity, StudioKeyIntensity, StudioKeyIntensity, 1);
     private const float StudioKeyIntensity = 16, AssetAmbientIntensity = .5f;
-    // Assumed: a fixed preview exposure, tuned by eye, so dark items stay dark.
+    // Viewer choice: a fixed preview exposure, so dark items stay dark.
     private const float AssetViewerStops = 1.5f;
     // Viewer backdrop: a dark blue-gray near the gradient's level, darkened by the gain.
     private static readonly Vector3 AssetBackdrop = new Vector3(.85f, 1, 1.35f) * .045f;

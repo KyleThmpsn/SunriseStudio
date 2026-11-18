@@ -81,8 +81,9 @@ public static class NativeGearPlating
     }
 
     /**
-     * Item dyes: MaterialOverrides1 rows, then MaterialOverrides2 rows replace rows of the same i8 key, then the
-     * rows of the shader the item's sockets start with. A shader that does not read leaves the item's own.
+     * Item dyes in the game's order, each row replacing an earlier one of the same i8 key: the item's
+     * MaterialOverrides1, the starting shader's 1 then 0, the item's 2, the shader's 2. A shader that does not
+     * read leaves the item's own.
      * @return The records by slot, the default record where the item names none; null when unreadable.
      */
     public static NativeGearDyes? ReadItemDyes(PackageCatalog catalog, byte[] item, out string? error)
@@ -90,37 +91,33 @@ public static class NativeGearPlating
         error = null;
         try
         {
-            var rows = new List<(sbyte Key, int Dye)>();
-            Take(item);
+            int[][] own = Overrides(item);
+            (byte[] Bytes, int[][] Lists)? shader = null;
             string described = "the item's dyes";
-            var own = rows.ToList();
             try
             {
-                if (GuardianArt.EquippedShader(catalog, item) is not 0 and var shader)
+                if (GuardianArt.EquippedShader(catalog, item) is not 0 and var tag)
                 {
-                    // Assumed: the shader's rows replace the item's like the item's second list does.
-                    Take(catalog.Read(shader));
-                    return Dyes(WithShader);
+                    byte[] bytes = catalog.Read(tag);
+                    shader = (bytes, Overrides(bytes));
+                    described = "the item's dyes with its shader";
                 }
             }
             catch (Exception exception) when (Unreadable(exception))
             {
-                rows = own;
                 described += $" (shader unreadable: {exception.Message})";
             }
-            return Dyes(described);
+            var rows = new List<(sbyte Key, int Dye)>();
+            Take(item, own[1]);
+            if (shader is { } plug) { Take(plug.Bytes, plug.Lists[1]); Take(plug.Bytes, plug.Lists[0]); }
+            Take(item, own[2]);
+            if (shader is { } locked) Take(locked.Bytes, locked.Lists[2]);
+            var (records, decalMode) = ScopeRecords(catalog, rows.Select(row => row.Dye));
+            return new(records, described, decalMode, ItemKind(item));
 
-            // 0x7FF742200F30 owns the order of the two lists.
-            void Take(byte[] source)
+            void Take(byte[] source, int[] list)
             {
-                int art = Relative(source, in TagView.Member<ItemDefinition, RelativePointer<ItemTranslationBlock>>(source, 0,
-                    nameof(ItemDefinition.TranslationItemBlock)));
-                int stride = Unsafe.SizeOf<ItemMaterialOverride>();
-                int[] first = Rows(source, art + TagView.FieldOffset<ItemTranslationBlock>(nameof(ItemTranslationBlock.MaterialOverrides1)),
-                    ItemMaterialOverride.Class, stride);
-                int[] second = Rows(source, art + TagView.FieldOffset<ItemTranslationBlock>(nameof(ItemTranslationBlock.MaterialOverrides2)),
-                    ItemMaterialOverride.Class, stride);
-                foreach (int row in first.Concat(second))
+                foreach (int row in list)
                 {
                     ref readonly var entry = ref TagView.At<ItemMaterialOverride>(source, row);
                     (sbyte Key, int Dye) value = (entry.Key, entry.Value);
@@ -128,11 +125,6 @@ public static class NativeGearPlating
                     if (same < 0) rows.Add(value);
                     else rows[same] = value;
                 }
-            }
-            NativeGearDyes Dyes(string source)
-            {
-                var (records, decalMode) = ScopeRecords(catalog, rows.Select(row => row.Dye));
-                return new(records, source, decalMode, ItemKind(item));
             }
         }
         catch (Exception exception) when (Unreadable(exception))
@@ -142,8 +134,16 @@ public static class NativeGearPlating
         }
     }
 
-    /** The dye source of an item whose shader's rows were merged over its own. */
-    public const string WithShader = "the item's dyes with its shader";
+    // MaterialOverrides0 to 2 of an item or plug, as row offsets.
+    private static int[][] Overrides(byte[] source)
+    {
+        int art = Relative(source, in TagView.Member<ItemDefinition, RelativePointer<ItemTranslationBlock>>(source, 0,
+            nameof(ItemDefinition.TranslationItemBlock)));
+        string[] lists = [nameof(ItemTranslationBlock.MaterialOverrides0), nameof(ItemTranslationBlock.MaterialOverrides1),
+            nameof(ItemTranslationBlock.MaterialOverrides2)];
+        return [.. lists.Select(list => Rows(source, art + TagView.FieldOffset<ItemTranslationBlock>(list), ItemMaterialOverride.Class,
+            Unsafe.SizeOf<ItemMaterialOverride>()))];
+    }
 
     /** The gear kind of an item definition's bucket; null when the bucket has no measured kind. */
     public static int? ItemKind(byte[] item) => TagView.FitsThrough<ItemDefinition>(item, 0, BucketMember)

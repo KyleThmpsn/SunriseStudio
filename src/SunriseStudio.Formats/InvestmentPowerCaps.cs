@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using SunriseStudio.Packages;
 using SunriseStudio.Tags.Generated;
 using SunriseStudio.Tags.Views;
 
@@ -27,8 +28,11 @@ public static class InvestmentPowerCaps
         return caps;
     }
 
+    /** True for a cap the game displays as Power; a no-limit row is not one. */
+    public static bool IsLimit(int cap) => cap < NoLimit;
+
     /**
-     * The highest cap among the item's versions; a version with no limit takes the highest cap the game displays.
+     * The highest cap among the item's versions, a no-limit row's value included.
      * Null when the item has no versions or one names no row.
      */
     public static int? ItemCap(ReadOnlyMemory<byte> definition, IReadOnlyList<int> caps)
@@ -39,14 +43,28 @@ public static class InvestmentPowerCaps
         if (quality < 0) return null;
         var versions = TagArray.Checked(span, quality + VersionsField, C80805921.Class, VersionStride);
         if (versions.Count == 0) return null;
-        int displayed = caps.Where(cap => cap < NoLimit).DefaultIfEmpty(0).Max();
         int highest = 0;
         for (int i = 0; i < versions.Count; i++)
         {
             int row = TagRead.U16(span, versions.Data + i * VersionStride);
             if (row >= caps.Count) return null;
-            highest = Math.Max(highest, caps[row] >= NoLimit ? displayed : caps[row]);
+            highest = Math.Max(highest, caps[row]);
         }
         return highest;
+    }
+
+    /** The lowest limit any gear reaches, the Power gear with a higher limit or none shows; null when none has one. */
+    public static int? SeasonCap(InvestmentCatalog investment, PackageCatalog packages, IReadOnlyList<int> caps)
+    {
+        int? lowest = null;
+        var gear = investment.Items.Where(item => item.Category is InvestmentCategory.Weapons or InvestmentCategory.Armor);
+        foreach (var item in gear)
+            try
+            {
+                if (ItemCap(packages.Read(item.Tag), caps) is { } cap && IsLimit(cap) && (lowest is null || cap < lowest))
+                    lowest = cap;
+            }
+            catch (Exception error) when (error is InvalidDataException or KeyNotFoundException) { }
+        return lowest;
     }
 }

@@ -8,6 +8,7 @@ using SunriseStudio.Tags.Generated;
 using SunriseStudio.Tags.Query;
 using ImGuiIcons = SunriseStudio.Viewport.ImGuiIcons;
 using StudioIcon = SunriseStudio.Viewport.StudioIcon;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -125,10 +126,7 @@ public sealed partial class StudioForm
         if (inline is not null) filtered = inline;
     }
 
-    /**
-     * Shows one category's list, keeping the search text to filter inside it. An item category opens the item catalog with a
-     * fresh search.
-     */
+    /** Shows one category's list, keeping the search; an item category opens the catalog with a fresh search. */
     private void OpenBrowserCategory(string name)
     {
         if (InvestmentItemKinds.Categories.Contains(name)) { OpenItems(name); return; }
@@ -202,8 +200,7 @@ public sealed partial class StudioForm
     {
         PollAssetFilter();
         if (itemsOpen) { DrawItemCatalog(); return; }
-        // Changed only sits right of the search. It is drawn before the home view, so the home view can list every changed
-        // asset.
+        // Changed only sits right of the search, drawn before the home view so it can list every changed asset.
         bool changes = workspace.Project is not null;
         ImGui.SetNextItemWidth(changes ? -ChangedOnlyWidth() : -1);
         if (ImGui.InputTextWithHint("##assetSearch", "Search items, enemies and assets", ref search, 256))
@@ -212,7 +209,7 @@ public sealed partial class StudioForm
         if (changes)
         {
             ImGui.SameLine();
-            if (ImGui.Checkbox("Changed only", ref changesOnly)) FilterBrowser();
+            if (StudioControls.Checkbox("Changed only", ref changesOnly)) FilterBrowser();
         }
         if (browserDirty && clock.Elapsed.TotalSeconds - searchChanged > 0.2) FilterBrowser();
         if (OpenCategory is { } open)
@@ -235,10 +232,7 @@ public sealed partial class StudioForm
     private static float ChangedOnlyWidth() => ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X
         + ImGui.CalcTextSize("Changed only").X + ImGui.GetStyle().ItemSpacing.X;
 
-    /**
-     * Lists an item category through the item catalog: the header with Back, the grid toggle, New and Clone, then Changed only
-     * and the catalog. A row opens its item.
-     */
+    /** An item category through the catalog: header with Back, grid, New and Clone, Changed only, then the list. */
     private void DrawItemCatalog()
     {
         var catalog = itemCatalog.RequestCatalog(workspace, followEdits: true);
@@ -252,8 +246,10 @@ public sealed partial class StudioForm
         else DrawCategoryCreation(itemBrowser.Kind, grid: true);
         if (catalog is null) { itemCatalog.Waiting(workspace, "Reading items"); return; }
         bool changes = workspace.Project is not null;
-        itemBrowser.DrawBar(workspace, catalog, options, changes ? ChangedOnlyWidth() : 0);
-        if (changes) { ImGui.SameLine(); ImGui.Checkbox("Changed only", ref changesOnly); }
+        // Changed only ends the bar's line, or takes the next one when the browser is too narrow for both.
+        bool beside = itemBrowser.DrawBar(workspace, catalog, options, changes ? ChangedOnlyWidth() : 0, count: false);
+        if (changes && beside) ImGui.SameLine();
+        if (changes) StudioControls.Checkbox("Changed only", ref changesOnly);
         ImGui.Separator();
         // While no open runs, the chosen row follows the open document's item. A clicked row stays chosen while it opens, and
         // the choice returns to the document's item when the open fails.
@@ -349,7 +345,7 @@ public sealed partial class StudioForm
     {
         float half = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) / 2;
         ImGui.SetNextItemWidth(half);
-        if (ImGui.BeginCombo("##category", category))
+        if (StudioControls.BeginCombo("##category", category))
         {
             foreach (string value in categories)
                 if (ImGui.Selectable(value, value == category))
@@ -360,7 +356,7 @@ public sealed partial class StudioForm
         ImGui.SameLine();
         DrawTypeFilter(-1);
         ImGui.SetNextItemWidth(-1);
-        if (ImGui.BeginCombo("##package", package))
+        if (StudioControls.BeginCombo("##package", package))
         {
             foreach (string value in packageNames)
                 if (ImGui.Selectable(value, value == package)) { package = value; FilterBrowser(); }
@@ -373,7 +369,7 @@ public sealed partial class StudioForm
     {
         ImGui.SetNextItemWidth(width);
         ImGui.BeginDisabled(assetTypes.Length < 2);
-        if (ImGui.BeginCombo("##asset-type", assetType))
+        if (StudioControls.BeginCombo("##asset-type", assetType))
         {
             foreach (string value in assetTypes)
                 if (ImGui.Selectable(value, value == assetType)) { assetType = value; FilterBrowser(); }
@@ -417,7 +413,7 @@ public sealed partial class StudioForm
         ImGui.EndChild();
     }
 
-    /** A full-width row: icon, label, and the count on the right. A category's game art stands in for its icon once it reads. */
+    /** A full-width row: icon, label and count; a category's game art replaces its icon once read. */
     private bool CategoryRow(string id, StudioIcon icon, string label, int count, string tooltip)
     {
         ImGui.PushID(id);
@@ -441,9 +437,18 @@ public sealed partial class StudioForm
         return clicked;
     }
 
+    /** A row's icon once it uploads: an item's, the sandbox perk's a perk program runs, or an icon asset's own art. */
+    private Rendering.GpuTexture? RowIcon(InvestmentCatalog investment, BrowserAsset row, bool itemRow)
+    {
+        uint tag = row.Entry.TagHash;
+        if (itemRow) return investment.FindItem(tag) is { } found ? icons.Get(investment, found.Index) : null;
+        if (row.Entry.Reference != InvestmentTags.PerkProgramClass) return icons.Asset(investment, tag);
+        return PerkPrograms.PerkOf(workspace.Catalog!, investment, tag) is { } perk ? icons.Perk(investment, perk) : null;
+    }
+
     /**
-     * Category rows show rarity colour and "Type . package", with no type that repeats the name; other rows show their
-     * kind. An item or an icon asset leads with its icon, the height of both lines.
+     * Category rows show rarity colour and "Type . package", without a type that repeats the name; others their kind.
+     * Items, perk programs and icon assets lead with a two-line icon.
      */
     private unsafe void DrawAssetRows()
     {
@@ -460,13 +465,15 @@ public sealed partial class StudioForm
                 var row = filtered[i];
                 ImGui.PushID(unchecked((int)row.Entry.TagHash));
                 var start = ImGui.GetCursorScreenPos();
+                IconList.Stripe(i, rowHeight);
                 bool active = row.Entry.TagHash == workspace.Document?.Entry.TagHash;
                 if (ImGui.Selectable("##asset", active, ImGuiSelectableFlags.None, new(0, rowHeight - 6 * scale)))
                     OpenFromBrowser(row.Entry.TagHash);
                 bool hovered = ImGui.IsItemHovered();
                 var draw = ImGui.GetWindowDrawList();
                 bool itemRow = row.Names.TryGetItem(row.Entry.TagHash, out _);
-                bool iconRow = itemRow || InvestmentCatalog.IsIconAsset(row.Entry.Reference);
+                bool iconRow = itemRow || row.Entry.Reference == InvestmentTags.PerkProgramClass
+                    || InvestmentCatalog.IsIconAsset(row.Entry.Reference);
                 var textStart = start + new Vector2((iconRow ? 4 * scale + icon : 0) + 7 * scale, 2 * scale);
                 var end = start + new Vector2(ImGui.GetContentRegionAvail().X - 4, rowHeight);
                 draw.PushClipRect(start, end, true);
@@ -475,9 +482,7 @@ public sealed partial class StudioForm
                     // A frame-coloured square holds the place while the icon reads.
                     var corner = start + new Vector2(4 * scale, scale);
                     draw.AddRectFilled(corner, corner + new Vector2(icon), ImGui.GetColorU32(ImGuiCol.FrameBg));
-                    var shown = investment is null ? null : itemRow
-                        ? investment.FindItem(row.Entry.TagHash) is { } found ? icons.Get(investment, found.Index) : null
-                        : icons.Asset(investment, row.Entry.TagHash);
+                    var shown = investment is null ? null : RowIcon(investment, row, itemRow);
                     if (shown is not null) InvestmentIconCache.DrawFitted(draw, shown, corner, corner + new Vector2(icon));
                     wantsInvestment |= investment is null;
                 }
@@ -536,8 +541,6 @@ public sealed partial class StudioForm
     {
         BeginPanel("Inspector", position, size);
         TrackAreaFocus();
-        ImGui.TextUnformatted("INSPECTOR");
-        ImGui.Separator();
         if (collisionInspected is not null && DrawCollisionInspector()) { ImGui.End(); return; }
         if (selectedGroupId is not null && DrawGroupInspector()) { ImGui.End(); return; }
         if (selectedObject is not null && DrawSelectedObjectInspector()) { ImGui.End(); return; }
@@ -553,7 +556,7 @@ public sealed partial class StudioForm
             // Without the registry the Tag page is hidden, so the reason shows here.
             if (StudioWorkspace.TagSchemaError is { Length: > 0 } schemaError)
                 ImGui.TextColored(StudioTheme.Accent, "Tag registry not loaded: " + schemaError);
-            if (ImGui.CollapsingHeader("Native metadata"))
+            if (StudioControls.CollapsingHeader("Native metadata"))
                 StudioUi.Facts("native-metadata", [
                     ("Reference", $"{document.Entry.Reference:X8}", ""),
                     ("Type", $"{document.Entry.Type} / {document.Entry.SubType}", ""),
@@ -614,19 +617,19 @@ public sealed partial class StudioForm
                 }
                 if (!property.Editable) ImGui.TextDisabled("Read only");
             }
-            if (document.Scene is { } scene && ImGui.CollapsingHeader("Scene"))
+            if (document.Scene is { } scene && StudioControls.CollapsingHeader("Scene"))
                 StudioUi.Facts("scene-facts", [
                     ("Objects", $"{scene.Instances.Count:N0}", ""),
                     ("Markers", $"{scene.Markers.Count:N0}", ""),
                     ("Triangles", $"{scene.Instances.Sum(instance => (long)instance.Mesh.Indices.Length / 3):N0}", "")]);
             if (document.Scene is { } effectScene) DrawEffectControls(effectScene, null);
-            if (document.Scene?.Diagnostics.Count > 0 && ImGui.CollapsingHeader("Load report"))
+            if (document.Scene?.Diagnostics.Count > 0 && StudioControls.CollapsingHeader("Load report"))
                 StudioUi.Facts("load-report", document.Scene.Diagnostics.Take(100));
             if (AssetPreviewViewport is { Scene: { } previewScene } preview && preview.CollisionPossible(previewScene))
                 DrawCollisionReport(preview);
-            if (document.NativeError.Length != 0 && ImGui.CollapsingHeader("Shader report"))
+            if (document.NativeError.Length != 0 && StudioControls.CollapsingHeader("Shader report"))
                 DrawErrorRow(document.NativeError);
-            if (AssetPreviewViewport is { NativeSceneReady: true } native && ImGui.CollapsingHeader("Shader report##native-scene"))
+            if (AssetPreviewViewport is { NativeSceneReady: true } native && StudioControls.CollapsingHeader("Shader report##native-scene"))
             {
                 if (native.NativeError is { } error) DrawErrorRow(error);
                 StudioUi.Facts("shader-parts", [("Prepared parts", $"{native.NativePartCount:N0}", "")]);

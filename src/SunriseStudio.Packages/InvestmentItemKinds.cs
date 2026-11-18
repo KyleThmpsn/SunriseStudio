@@ -1,9 +1,6 @@
 namespace SunriseStudio.Packages;
 
-/**
- * Facts of one investment item: its index row, bucket, tier, display type line, which blocks are set, whether it lists
- * a socket and whether it names a weapon type.
- */
+/** One investment item's index row, bucket, tier, type line, set blocks, and whether it has a socket and weapon type. */
 public readonly record struct InvestmentItemFacts(ushort Index, uint Hash, uint DisplayTag, byte Bucket, byte Tier,
     string TypeLine, bool HasObjectives, bool HasPlug, bool HasSack, bool HasQuality, bool HasSockets, bool HasWeaponType);
 
@@ -31,7 +28,7 @@ public static class InvestmentItemKinds
 
     /** The inventory bucket of shader items. */
     public const byte ShaderBucket = 14;
-    /** Assumed: tier 4 is Legendary. */
+    /** The tier byte of Legendary items; Exotics are 5. */
     public const byte LegendaryTier = 4;
 
     // Buckets with one fixed category, by inventory bucket id.
@@ -67,8 +64,8 @@ public static class InvestmentItemKinds
     public const byte LastWeaponBucket = 2, LastArmorBucket = 7;
 
     /**
-     * Display copies of gear: no quality block, a weapon with no type, or Rare and better gear with no socket.
-     * Basic and Common gear can lack sockets for real. A few copies match their real item and are not caught.
+     * Display copies of gear: no quality block, a weapon with no type, or Rare and better gear with no socket (lesser
+     * gear really lacks them). A few copies match their real item and are missed.
      */
     public static bool IsDummy(in InvestmentItemFacts facts) => facts.Bucket <= LastArmorBucket
         && (!facts.HasQuality || (facts.Bucket <= LastWeaponBucket && !facts.HasWeaponType)

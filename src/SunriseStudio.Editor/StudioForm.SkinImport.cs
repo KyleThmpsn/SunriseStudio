@@ -3,6 +3,7 @@ using ImGuiNET;
 using SunriseStudio.Authoring;
 using SunriseStudio.Packages;
 using SunriseStudio.Projects;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -97,7 +98,7 @@ public sealed partial class StudioForm
             ImGui.SetTooltip("Create asset supports the installed Hob rig profile");
         string Label(int index) => $"{workspace.DisplayName(skinTemplates[index].ModelTag)} / Part {index + 1}";
         ImGui.SetNextItemWidth(470 * scale);
-        if (ImGui.BeginCombo("Template", Label(skinTemplateIndex)))
+        if (StudioControls.BeginCombo("Template", Label(skinTemplateIndex)))
         {
             for (int index = 0; index < skinTemplates.Count; index++)
             {

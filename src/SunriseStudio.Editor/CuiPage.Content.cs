@@ -5,6 +5,7 @@ using SunriseStudio.Formats;
 using SunriseStudio.Packages;
 using SunriseStudio.Tags.Generated;
 using System.Numerics;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -70,7 +71,7 @@ public sealed partial class CuiPage
                 int group = contentValues.TryGetValue(CuiVisualPropertyKind.Group, out uint stored) ? unchecked((int)stored) : 0;
                 int count = field.Kind == CuiVisualPropertyKind.Group ? content?.BitmapFrames.Count ?? 0
                     : content is not null && (uint)group < content.BitmapFrames.Count ? content.BitmapFrames[group].Count : 0;
-                if (ImGui.BeginCombo(field.Name, $"{field.Name} {value}"))
+                if (StudioControls.BeginCombo(field.Name, $"{field.Name} {value}"))
                 {
                     for (int index = 0; index < count; index++)
                         if (ImGui.Selectable($"{field.Name} {index}", value == index)) contentValues[field.Kind] = (uint)index;
@@ -87,7 +88,7 @@ public sealed partial class CuiPage
                 if (configured is not null && context.Workspace.ConfigSetting(configured) is { } setting)
                     SunriseStudio.Projects.ModManifest.TryParseBool(setting.Default, out enabled);
                 ImGui.BeginDisabled(configured is not null);
-                if (ImGui.Checkbox(field.Name, ref enabled)) contentValues[field.Kind] = enabled ? 1u : 0u;
+                if (StudioControls.Checkbox(field.Name, ref enabled)) contentValues[field.Kind] = enabled ? 1u : 0u;
                 ImGui.EndDisabled();
                 if (configured is not null) ConfigLabel(context, configured);
             }
@@ -95,7 +96,7 @@ public sealed partial class CuiPage
             {
                 string[] labels = field.Kind == CuiVisualPropertyKind.TextCase ? ["Original", "Uppercase", "Lowercase"] : ["Left", "Center", "Right"];
                 int choice = value <= 2 ? (int)value : -1;
-                if (ImGui.Combo(field.Name, ref choice, labels, labels.Length)) contentValues[field.Kind] = (uint)choice;
+                if (StudioControls.Combo(field.Name, ref choice, labels, labels.Length)) contentValues[field.Kind] = (uint)choice;
             }
             else if (field.Kind == CuiVisualPropertyKind.FontSize)
             {
@@ -221,7 +222,7 @@ public sealed partial class CuiPage
     {
         if (missing.Count == 0) return;
         ImGui.SetNextItemWidth(-1);
-        if (ImGui.BeginCombo("##add-property", addingOverride?.Name ?? "Add property"))
+        if (StudioControls.BeginCombo("##add-property", addingOverride?.Name ?? "Add property"))
         {
             foreach (var choice in missing)
                 if (ImGui.Selectable(choice.Name, choice == addingOverride))
@@ -242,14 +243,14 @@ public sealed partial class CuiPage
         else if (property.Kind == CuiVisualPropertyKind.AutoWidth)
         {
             bool enabled = overrideValue != 0;
-            if (ImGui.Checkbox("Enabled", ref enabled)) overrideValue = enabled ? 1u : 0u;
+            if (StudioControls.Checkbox("Enabled", ref enabled)) overrideValue = enabled ? 1u : 0u;
         }
         else if (property.Kind is CuiVisualPropertyKind.TextCase or CuiVisualPropertyKind.Alignment)
         {
             string[] labels = property.Kind == CuiVisualPropertyKind.TextCase
                 ? ["Original", "Uppercase", "Lowercase"] : ["Left", "Center", "Right"];
             int choice = (int)overrideValue;
-            if (ImGui.Combo("Value", ref choice, labels, labels.Length)) overrideValue = (uint)choice;
+            if (StudioControls.Combo("Value", ref choice, labels, labels.Length)) overrideValue = (uint)choice;
         }
         else if (property.Kind is CuiVisualPropertyKind.Group or CuiVisualPropertyKind.Frame)
         {
@@ -257,7 +258,7 @@ public sealed partial class CuiPage
                 ? unchecked((int)stored.Value) : 0;
             int count = property.Kind == CuiVisualPropertyKind.Group ? content?.BitmapFrames.Count ?? 0
                 : content is not null && (uint)group < content.BitmapFrames.Count ? content.BitmapFrames[group].Count : 0;
-            if (ImGui.BeginCombo("Value", $"{property.Name} {overrideValue}"))
+            if (StudioControls.BeginCombo("Value", $"{property.Name} {overrideValue}"))
             {
                 for (int index = 0; index < count; index++)
                     if (ImGui.Selectable($"{property.Name} {index}", overrideValue == index)) overrideValue = (uint)index;

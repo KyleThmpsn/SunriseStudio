@@ -1,6 +1,7 @@
 using ImGuiNET;
 using SunriseStudio.Formats;
 using SunriseStudio.Projects;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -94,7 +95,7 @@ public sealed partial class StudioForm
                 var settings = draft.Settings.Where(value => value.Type == site.Type).ToArray();
                 ImGui.TextUnformatted(site.Site.Name);
                 ImGui.SetNextItemWidth(330 * scale);
-                if (ImGui.BeginCombo("Setting", configSettingKey.Length == 0 ? "Choose " + site.Type.ToString().ToLowerInvariant() + " setting" : configSettingKey))
+                if (StudioControls.BeginCombo("Setting", configSettingKey.Length == 0 ? "Choose " + site.Type.ToString().ToLowerInvariant() + " setting" : configSettingKey))
                 {
                     foreach (var setting in settings)
                         if (ImGui.Selectable($"{setting.Key} = {setting.Default}", configSettingKey == setting.Key)) configSettingKey = setting.Key;

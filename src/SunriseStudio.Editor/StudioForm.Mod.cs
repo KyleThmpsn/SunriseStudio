@@ -1,6 +1,7 @@
 using System.Globalization;
 using ImGuiNET;
 using SunriseStudio.Projects;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -127,7 +128,7 @@ public sealed partial class StudioForm
         if (ImGui.SmallButton("Add dependency")) modDependencies.Add(["", "1.0.0", ""]);
         ImGui.TextUnformatted("Incompatible mod ids, one per line");
         ImGui.InputTextMultiline("##modIncompatible", ref modIncompatible, 4096, new(wide, 55 * scale));
-        ImGui.Checkbox("Cheat", ref modCheat);
+        StudioControls.Checkbox("Cheat", ref modCheat);
         StudioUi.Tip("No progress saves while this mod is loaded.");
         DrawModConfig();
         var metadata = CurrentMod();
@@ -166,13 +167,13 @@ public sealed partial class StudioForm
                 ImGui.PushID(index); ImGui.TableNextRow();
                 ImGui.TableNextColumn(); ImGui.SetNextItemWidth(-1); ImGui.InputTextWithHint("##key", "key", ref row.Key, 64);
                 ImGui.TableNextColumn(); ImGui.SetNextItemWidth(-1);
-                ImGui.Combo("##type", ref row.Type, ModConfigTypes, ModConfigTypes.Length);
+                StudioControls.Combo("##type", ref row.Type, ModConfigTypes, ModConfigTypes.Length);
                 ImGui.TableNextColumn(); ImGui.SetNextItemWidth(-1);
                 switch ((ModConfigType)row.Type)
                 {
                     case ModConfigType.Int: ImGui.InputInt("##default", ref row.Integer, 0); break;
                     case ModConfigType.Float: ImGui.InputFloat("##default", ref row.Real, 0, 0, "%g"); break;
-                    default: ImGui.Checkbox("##default", ref row.Flag); break;
+                    default: StudioControls.Checkbox("##default", ref row.Flag); break;
                 }
                 ImGui.TableNextColumn(); ImGui.SetNextItemWidth(-1); ImGui.InputTextWithHint("##name", "Name", ref row.Name, 256);
                 ImGui.TableNextColumn();

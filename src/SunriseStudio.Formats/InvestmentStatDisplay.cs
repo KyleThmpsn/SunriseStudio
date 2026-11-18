@@ -56,15 +56,43 @@ public sealed class InvestmentStatCurve
     }
 }
 
+/** One stat a display group shows, with its curve. Numeric shows no bar; linear shows the raw value unless a point names it. */
+public readonly record struct InvestmentGroupStat(byte Stat, bool Numeric, bool Linear, InvestmentStatCurve Curve)
+{
+    /** The value the group shows for a raw value. A curve with no points shows the raw value. */
+    public int Shown(int raw)
+    {
+        if (Curve.Points.Count == 0) return raw;
+        if (!Linear) return Curve.Evaluate(raw);
+        foreach (var point in Curve.Points)
+            if (point.Input == raw) return point.Output;
+        return raw;
+    }
+}
+
+/** How a display shows its stats: the group's stats in the game's order and the value a full bar stands for. */
+public sealed record InvestmentStatGroup(int FullBar, IReadOnlyList<InvestmentGroupStat> Stats);
+
 public sealed partial class InvestmentCatalog
 {
     private static readonly int StatDisplayPointer = TagView.FieldOffset<ItemDisplayStrings>("TalentGridItemBlock"),
         StatGroupRowsField = TagView.FieldOffset<SStatGroupTable>("Table");
+    /**
+     * Fields the registry does not name: a group's i32 full-bar value after its spare array, and the numeric and linear
+     * bytes, the first and third after a stat row's stat index.
+     */
+    private static readonly int FullBarAfterSpare = Unsafe.SizeOf<TagArray<Unknown>>(), NumericAfterStat = 1,
+        LinearAfterStat = 3;
 
-    /** Missing context-dependent values stay raw instead of being labelled final gameplay stats. */
-    private IReadOnlyDictionary<byte, InvestmentStatCurve> ReadDisplayCurves(InvestmentItem item, List<string> diagnostics)
+    /**
+     * Missing context-dependent values stay raw instead of being labelled final gameplay stats.
+     * @param shown Receives how the display shows its stats, or null when it has no stat block or does not read.
+     */
+    private IReadOnlyDictionary<byte, InvestmentStatCurve> ReadDisplayCurves(InvestmentItem item, List<string> diagnostics,
+        out InvestmentStatGroup? shown)
     {
         var result = new Dictionary<byte, InvestmentStatCurve>();
+        shown = null;
         if (item.DisplayTag == 0) return result;
         try
         {
@@ -75,6 +103,8 @@ public sealed partial class InvestmentCatalog
             if (block < 4 || !TagView.Fits<SItemDisplayStatBlock>(display, block)
                 || new TagPointer(display, StatDisplayPointer).TargetClass != SItemDisplayStatBlock.Class)
                 throw new InvalidDataException("Item stat display block has an unexpected class.");
+            var rows = new List<InvestmentGroupStat>();
+            shown = new(0, rows);
             byte groupIndex = TagView.At<SItemDisplayStatBlock>(display, block).StatGroupIndex;
             if (groupIndex == byte.MaxValue) return result;
             if (!catalog.ContainsTag(sources.StatGroups)) throw new InvalidDataException("Stat groups are unavailable.");
@@ -87,6 +117,7 @@ public sealed partial class InvestmentCatalog
                 throw new InvalidDataException("Item stat group is outside its native index.");
             ref readonly var group = ref TagView.At<SStatGroup>(groups, groupRows.Data + groupIndex * groupStride);
             uint groupHash = group.GroupHash;
+            shown = new(TagRead.I32(groups, TagView.OffsetOf(groups, in group.SpareArray) + FullBarAfterSpare), rows);
             var stats = TagArray.Checked(groups, TagView.OffsetOf(groups, in group.Stats), SStatGroupRow.Class, statStride);
             if (stats.Count > 256) throw new InvalidDataException("Stat group contains too many rows.");
             var seen = new HashSet<byte>();
@@ -95,8 +126,6 @@ public sealed partial class InvestmentCatalog
                 ref readonly var row = ref TagView.At<SStatGroupRow>(groups, stats.Data + i * statStride);
                 byte stat = row.StatIndex;
                 if (!seen.Add(stat)) throw new InvalidDataException("Stat group contains duplicate stat rows.");
-                if (stat == 24)
-                { diagnostics.Add("Magazine display needs item context; the raw value remains editable."); continue; }
                 var curve = TagArray.Checked(groups, TagView.OffsetOf(groups, in row.DisplayCurve), SStatCurvePoint.Class, pointStride);
                 if (curve.Count > 4096) throw new InvalidDataException("Stat display point count is invalid.");
                 var points = new InvestmentStatPoint[curve.Count];
@@ -105,11 +134,17 @@ public sealed partial class InvestmentCatalog
                     ref readonly var point = ref TagView.At<SStatCurvePoint>(groups, curve.Data + j * pointStride);
                     points[j] = new(point.Input, point.Output);
                 }
-                result.Add(stat, new(stat, groupIndex, groupHash, points));
+                var statCurve = new InvestmentStatCurve(stat, groupIndex, groupHash, points);
+                int flags = TagView.OffsetOf(groups, in row.StatIndex);
+                rows.Add(new(stat, TagRead.U8(groups, flags + NumericAfterStat) == 1,
+                    TagRead.U8(groups, flags + LinearAfterStat) == 1, statCurve));
+                if (stat == 24)
+                { diagnostics.Add("Magazine display needs item context; the raw value remains editable."); continue; }
+                result.Add(stat, statCurve);
             }
         }
         catch (Exception error) when (Recoverable(error))
-        { result.Clear(); diagnostics.Add("Stat display: " + error.Message); }
+        { result.Clear(); shown = null; diagnostics.Add("Stat display: " + error.Message); }
         return new ReadOnlyDictionary<byte, InvestmentStatCurve>(result);
     }
 }

@@ -162,6 +162,15 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
     /** Borrowed scene indexes remain valid until the next render or scene change. */
     public IReadOnlyList<int> VisibleIndices => visibleItems;
     public bool ShowCursor { get; set; } = true;
+    /** Shows a Full Screen button in the tool row that calls this; null leaves the button out. */
+    public Action? FullScreenToggle { get; set; }
+    /**
+     * Draws a caller's controls at the end of the tool row. It is handed the row's wrap, which takes a width, and the
+     * screen x the row ends at.
+     */
+    public Action<Action<float>, float>? ToolbarTail { get; set; }
+    /** Whether the view is full screen now, which the button shows. */
+    public bool FullScreen { get; set; }
     public bool ShowCursorToggle { get; set; } = true;
     /** True when this viewport was under the pointer in the current frame. */
     public bool IsHovered => hoverFrame == ShortcutInput.Frame;
@@ -734,15 +743,24 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
         Animation?.DrawImGui();
     }
 
-    /** The controls across the view's top while the pointer is over it, or while one of their menus is open. */
+    // Full screen shows its floating controls while the pointer is within this many rows of the view's top.
+    private const float RevealRows = 2;
+    private float floatingHeight;
+
+    /**
+     * The controls across the view's top while the pointer is over it, or while one of their menus is open. Full screen
+     * keeps the pointer on the view, so there they show only while it is near the top edge or on the controls.
+     */
     private void DrawFloatingControls(Vector2 origin, Vector2 size)
     {
+        float reach = FullScreen ? MathF.Max(floatingHeight, ImGui.GetFrameHeightWithSpacing() * RevealRows) : size.Y;
         bool over = ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem)
-            && ImGui.IsMouseHoveringRect(origin, origin + size);
+            && ImGui.IsMouseHoveringRect(origin, origin + size with { Y = reach });
         controlsShown = over || controlsShown && ImGui.IsPopupOpen("", ImGuiPopupFlags.AnyPopupId | ImGuiPopupFlags.AnyPopupLevel);
-        if (!controlsShown) return;
+        if (!controlsShown) { floatingHeight = 0; return; }
         ImGui.SetCursorScreenPos(origin);
         ControlsBar(size.X, .88f);
+        floatingHeight = ImGui.GetItemRectSize().Y;
         // Back to the view's bottom edge with an empty item, since a window must not end on a bare cursor move.
         ImGui.SetCursorScreenPos(origin with { Y = origin.Y + size.Y });
         ImGui.Dummy(Vector2.Zero);
@@ -784,6 +802,13 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
         ImGui.BeginDisabled(locked);
         if (ImGuiIcons.Button("frame-all", StudioIcon.Frame, textureData is null ? tips[0] : tips[1])) Frame();
         ImGui.EndDisabled();
+        if (FullScreenToggle is { } toggle)
+        {
+            ImGui.SameLine();
+            string keys = ShortcutInput.Text(ShortcutActions.FullScreen3D);
+            if (ImGuiIcons.Button("full-screen", FullScreen ? StudioIcon.ExitFullScreen : StudioIcon.FullScreen,
+                (FullScreen ? "Exit Full Screen" : "Full Screen") + (keys.Length == 0 ? "" : $"\n{keys}"), FullScreen)) toggle();
+        }
         if (textureData is { } data)
         {
             Slider("Mip");
@@ -853,6 +878,7 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
             }
             ImGui.EndDisabled();
             if (Scene is not null) DrawPlayerControls(Next);
+            ToolbarTail?.Invoke(Next, right);
             if (ShowGameShaderToggle)
             {
                 Next(button);
@@ -873,7 +899,7 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
                 float width = ImGui.CalcTextSize(detail).X + button + style.FramePadding.X * 2;
                 Next(width);
                 ImGui.SetNextItemWidth(width);
-                if (ImGui.BeginCombo("##asset-lod", detail))
+                if (StudioControls.BeginCombo("##asset-lod", detail))
                 {
                     foreach (int level in Visibility.AvailableDetailLevels)
                         if (ImGui.Selectable($"LOD {level}", Visibility.DetailLevel == level))
@@ -900,7 +926,7 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
                     float width = ImGui.CalcTextSize("Layers").X + button + style.FramePadding.X * 2;
                     Next(width);
                     ImGui.SetNextItemWidth(width);
-                    if (ImGui.BeginCombo("##asset-layers", "Layers"))
+                    if (StudioControls.BeginCombo("##asset-layers", "Layers", ImGuiComboFlags.HeightLargest))
                     {
                         SceneLayerMenu.Draw(Visibility, presentLayers, this);
                         ImGui.EndCombo();
@@ -1092,6 +1118,8 @@ public sealed partial class AssetViewport(Dx11Renderer renderer) : IDisposable
                 if (ShortcutInput.Pressed(ShortcutActions.TogglePlayer3D)) SetPlayerCamera(!Camera.Player);
             }
         }
+        // A held stick or trigger takes the camera as a player.
+        if (!image && TakesPad(hovered) && Gamepad.Current.Steering) SetPlayerCamera(true);
         if (!image && PlayerCamera) MovePlayer(hovered || dragButton >= 0);
         if (selecting && ImGui.IsMouseReleased((ImGuiMouseButton)selectButton))
         {

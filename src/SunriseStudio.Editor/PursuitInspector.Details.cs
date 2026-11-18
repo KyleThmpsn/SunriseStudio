@@ -3,6 +3,7 @@ using System.Numerics;
 using ImGuiNET;
 using SunriseStudio.Formats;
 using SunriseStudio.Live;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -83,7 +84,7 @@ internal sealed partial class PursuitInspector
         StudioUi.Facts("pursuit-data", Installed(step.Catalog, step.Tables, step.Item, step.Pursuit));
         if (step.Live) DrawSaved(step);
         if (step.Pursuit?.Diagnostics is { Count: > 0 } notes
-            && ImGui.CollapsingHeader($"Pursuit notes ({notes.Count})###pursuit-notes"))
+            && StudioControls.CollapsingHeader($"Pursuit notes ({notes.Count})###pursuit-notes"))
             StudioUi.Facts("pursuit-notes", notes);
     }
 

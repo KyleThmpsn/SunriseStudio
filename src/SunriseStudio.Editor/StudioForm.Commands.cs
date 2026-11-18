@@ -126,6 +126,8 @@ public sealed partial class StudioForm
             bool wire = viewport?.Wireframe ?? false, grid = viewport?.ShowGrid ?? true;
             if (ImGui.MenuItem("Wireframe", "", ref wire)) viewport!.Wireframe = wire;
             if (ImGui.MenuItem("Grid", "", ref grid)) viewport!.ShowGrid = grid;
+            if (ImGui.MenuItem("Full Screen", ShortcutInput.Text(ShortcutActions.FullScreen3D), fullScreen is not null,
+                workspace.World is not null)) BeginInvoke(ToggleFullScreen);
             DrawLayoutMenu();
             ImGui.EndMenu();
         }
@@ -197,10 +199,23 @@ public sealed partial class StudioForm
         float titleTop = (height - ImGui.GetTextLineHeight()) / 2;
         float baseline = titleTop + FontAscent();
         ImGui.SetCursorPosY(titleTop);
-        ImGui.TextColored(StudioTheme.Accent, "SUNRISE");
-        ImGui.SameLine(0, ImGui.CalcTextSize(" ").X);
-        ImGui.SetCursorPosY(titleTop);
-        ImGui.TextUnformatted("STUDIO");
+        if (gui!.GameFonts?.Figure is { } face)
+        {
+            // The name is set in the game's face once an installation supplies it, as the loading screen sets it.
+            const string Name = "SUNRISE STUDIO";
+            float size = BrandHeight * scale, nameTop = height / 2 - size * NameCapCentre;
+            baseline = nameTop + size * NameBaseline;
+            ImGui.GetWindowDrawList().AddText(face, size, new(ImGui.GetCursorScreenPos().X, ImGui.GetWindowPos().Y + nameTop),
+                ImGui.GetColorU32(ImGuiCol.Text), Name);
+            ImGui.Dummy(new(face.CalcTextSizeA(size, float.MaxValue, 0, Name).X, ImGui.GetTextLineHeight()));
+        }
+        else
+        {
+            ImGui.TextColored(StudioTheme.Accent, "SUNRISE");
+            ImGui.SameLine(0, ImGui.CalcTextSize(" ").X);
+            ImGui.SetCursorPosY(titleTop);
+            ImGui.TextUnformatted("STUDIO");
+        }
         ImGui.PopFont();
         ImGui.SameLine(0, 6 * scale);
         ImGui.SetCursorPosY(baseline - FontAscent());
@@ -235,7 +250,7 @@ public sealed partial class StudioForm
         { settings.GameShaders = shading; PrepareGameShaders(); }
         ImGui.SameLine();
         bool fullDetail = settings.FullDetail;
-        if (ImGui.Checkbox("Full detail", ref fullDetail))
+        if (StudioControls.Checkbox("Full detail", ref fullDetail))
         {
             settings.FullDetail = fullDetail;
             if (viewport is not null) viewport.FullDetail = fullDetail;
@@ -247,7 +262,7 @@ public sealed partial class StudioForm
         ImGui.BeginDisabled(!settings.GameShaders);
         ImGui.SetNextItemWidth(90 * scale);
         int lighting = (int)settings.LightingMode;
-        if (ImGui.Combo("##lighting", ref lighting, LightingNames, LightingNames.Length))
+        if (StudioControls.Combo("##lighting", ref lighting, LightingNames, LightingNames.Length))
         {
             settings.LightingMode = (SunriseStudio.Rendering.NativeLightingMode)lighting;
             if (viewport?.NativeRenderer is { } scene) scene.LightingMode = settings.LightingMode;
@@ -296,7 +311,7 @@ public sealed partial class StudioForm
         ImGui.InputText("##install", ref location, 4096);
         ImGui.SameLine();
         if (ImGui.Button("Browse")) PickFolder("Sunrise installation", path => location = path);
-        if (ImGui.CollapsingHeader("Package key source"))
+        if (StudioControls.CollapsingHeader("Package key source"))
         {
             ImGui.SetNextItemWidth(465 * scale);
             ImGui.InputTextWithHint("##keySource", "Automatic", ref keySource, 4096);
@@ -373,7 +388,7 @@ public sealed partial class StudioForm
         ImGui.TextUnformatted("Name"); ImGui.SetNextItemWidth(-1);
         ImGui.InputText("##addName", ref addName, 128);
         ImGui.SetNextItemWidth(-1);
-        if (cloneSource is null) ImGui.Combo("##assetKind", ref addKind, ["Source asset", "Native package entry"], 2);
+        if (cloneSource is null) StudioControls.Combo("##assetKind", ref addKind, ["Source asset", "Native package entry"], 2);
         if (addKind == 1)
         {
             ImGui.SetNextItemWidth(140 * scale); ImGui.InputText("Package ID", ref addPackageId, 4, ImGuiInputTextFlags.CharsHexadecimal);

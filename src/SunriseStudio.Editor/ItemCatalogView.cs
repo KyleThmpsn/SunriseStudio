@@ -1,6 +1,8 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using ImGuiNET;
 using SunriseStudio.Formats;
+using SunriseStudio.Packages;
 using SunriseStudio.Viewport;
 using ItemKinds = SunriseStudio.Packages.InvestmentItemKinds;
 
@@ -27,14 +29,29 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
     public const string AllItems = "All items";
     /** The kind and sort menus' width in font heights, enough for "Mods and plugs". */
     internal const float MenuFonts = 10;
+    // The search box's narrowest width in font heights, enough for its hint.
+    private const float SearchFonts = 6;
     // A picker's size in font heights. The width keeps the bar on one line.
     private const float PickerWidthFonts = 44, PickerHeightFonts = 24;
     private static readonly string[] SortNames = ["Installed order", "Name", "Rarity", "Type"];
     private readonly IconGrid grid = new();
     private string search = "";
     private ItemSort sort;
+    // The Filters menu's choices; null leaves a filter off. A choice the listed kind does not offer is not applied.
+    private string? typeFilter;
+    private byte? tierFilter;
+    private int? damageFilter, ammoFilter;
     // Leaves out the display copies of gear InvestmentItemKinds.IsDummy finds.
     private bool hideDummies = true;
+    // How many dummies the kind, search and options list, hidden or not.
+    private int dummies;
+    // The type lines and rarity tiers of the listed kind's rows, which the menu offers.
+    private string[] types = [];
+    private byte[] tiers = [];
+    // Each weapon's damage type and ammo type by tag, read the first time a filter asks for it.
+    private static readonly ConditionalWeakTable<InvestmentCatalog, Dictionary<uint, (int? Damage, int? Ammo)>> WeaponFacts = [];
+    private const string Any = "Any";
+    private static readonly string[] FilterLabels = ["Item Type", "Rarity", "Damage Type", "Ammo Type"];
     private int chosen = -1;
     // What the next draw does to the list's scroll: back to the top for new rows, then to the chosen item when the rows list it.
     private bool scrollToTop, scrollToChosen;
@@ -44,9 +61,9 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
     private InvestmentItem? contextItem;
     // The kind, search, order and narrowing the rows were built for. A change scrolls the list to the chosen item, or to the
     // top when the new rows do not list it.
-    private (string Kind, string Search, ItemSort Sort, IReadOnlyCollection<int>? Candidates, bool ChangedOnly, bool HideDummies)
-        filter;
-    // The data the rows were built from. A new catalog, category rows, new item names while dummies are hidden or, under
+    private (string Kind, string Search, ItemSort Sort, IReadOnlyCollection<int>? Candidates, bool ChangedOnly,
+        (string? Type, byte? Tier, int? Damage, int? Ammo, bool HideDummies) Choices) filter;
+    // The data the rows were built from. A new catalog, category rows, new item names, which decide the dummies, or, under
     // ChangedOnly, a project edit rebuilds the rows without moving the list.
     private (InvestmentCatalog? Catalog, BrowserAsset[]? KindRows, int ProjectRevision, int NameRevision) source;
     private InvestmentItem[] rows = [];
@@ -83,25 +100,32 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
     }
 
     /**
-     * Draws the search box, the kind and sort menus, the filter menu and the count on one line. Trailing is the width the caller
-     * keeps for its own controls after them.
+     * The search box, the kind, sort and filter menus and the count on one line, keeping Trailing for the caller.
+     * @param count False where the caller shows the count itself.
+     * @return False when a narrow line gave up Trailing, so the caller's controls take the next line.
      */
-    public void DrawBar(StudioWorkspace workspace, InvestmentCatalog catalog, ItemCatalogOptions options, float trailing)
+    public bool DrawBar(StudioWorkspace workspace, InvestmentCatalog catalog, ItemCatalogOptions options, float trailing,
+        bool count = true)
     {
         Rows(workspace, catalog, options);
         var style = ImGui.GetStyle();
-        float menu = MenuFonts * ImGui.GetFontSize();
+        float menu = MenuFonts * ImGui.GetFontSize(), narrowest = SearchFonts * ImGui.GetFontSize();
         int menus = kindMenu ? 2 : 1;
-        string count = InvestmentTableViews.Count(rows.Length, "item");
-        float counted = ImGui.CalcTextSize(count).X, filters = ImGui.GetFrameHeight();
-        ImGui.SetNextItemWidth(Math.Max(menu, ImGui.GetContentRegionAvail().X - menus * menu - filters - counted - trailing
-            - (menus + 2) * style.ItemSpacing.X));
+        string total = InvestmentTableViews.Count(rows.Length, "item");
+        float counted = ImGui.CalcTextSize(total).X + style.ItemSpacing.X, filters = ImGui.GetFrameHeight();
+        // What is left for the search box once the menus and the filter button have their widths.
+        float room = ImGui.GetContentRegionAvail().X - menus * menu - filters - (menus + 1) * style.ItemSpacing.X;
+        bool trails = room - trailing >= narrowest;
+        if (trails) room -= trailing;
+        bool counts = count && room - counted >= narrowest;
+        if (counts) room -= counted;
+        ImGui.SetNextItemWidth(Math.Max(narrowest, room));
         ImGui.InputTextWithHint("##item-search", "Search items", ref search, 256);
         ImGui.SameLine();
         if (kindMenu)
         {
             ImGui.SetNextItemWidth(menu);
-            if (ImGui.BeginCombo("##item-kind", KindLabel(Kind)))
+            if (StudioControls.BeginCombo("##item-kind", KindLabel(Kind)))
             {
                 foreach (string name in ItemKinds.Categories.Prepend(AllItems))
                     if (ImGui.Selectable(KindLabel(name), name == Kind)) Kind = name;
@@ -111,7 +135,7 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
             ImGui.SameLine();
         }
         ImGui.SetNextItemWidth(menu);
-        if (ImGui.BeginCombo("##item-sort", SortNames[(int)sort]))
+        if (StudioControls.BeginCombo("##item-sort", SortNames[(int)sort]))
         {
             for (int i = 0; i < SortNames.Length; i++)
                 if (ImGui.Selectable(SortNames[i], (int)sort == i)) sort = (ItemSort)i;
@@ -119,15 +143,99 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
         }
         StudioUi.Tip("Order");
         ImGui.SameLine();
-        if (StudioUi.IconButton("item-filters", StudioIcon.Filter, "Filters")) ImGui.OpenPopup("item-filters-menu");
+        // Lit while a filter leaves rows out.
+        bool narrowing = typeFilter is not null || tierFilter is not null
+            || Kind == ItemKinds.Weapons && (damageFilter is not null || ammoFilter is not null);
+        if (ImGuiIcons.Button("item-filters", StudioIcon.Filter, "Filters", active: narrowing || hideDummies && dummies != 0))
+            ImGui.OpenPopup("item-filters-menu");
         if (ImGui.BeginPopup("item-filters-menu"))
         {
-            ImGui.MenuItem("Hide Dummies", "", ref hideDummies);
-            StudioUi.Tip("Display copies of gear with no quality, weapon type or socket. A few look real and still show.");
+            DrawFilters(narrowing);
             ImGui.EndPopup();
         }
-        ImGui.SameLine();
-        ImGui.TextDisabled(count);
+        if (counts) { ImGui.SameLine(); ImGui.TextDisabled(total); }
+        return trails;
+    }
+
+    /**
+     * The Filters menu for the listed kind: its type lines and rarities, a weapon's damage and ammo types, and Hide
+     * Dummies where the kind holds gear. A filter with one value to choose is left out.
+     */
+    private void DrawFilters(bool narrowing)
+    {
+        var style = ImGui.GetStyle();
+        // The menu is a two-column form: muted labels end at one edge and every control starts at the next.
+        float labels = FilterLabels.Max(label => ImGui.CalcTextSize(label).X), left = ImGui.GetCursorPosX();
+        float controls = left + labels + style.ItemSpacing.X;
+        CompactFrames.Push();
+        void Label(string text)
+        {
+            ImGui.SetCursorPosX(left + labels - ImGui.CalcTextSize(text).X);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextDisabled(text);
+            ImGui.SameLine(controls);
+        }
+        if (types.Length > 1)
+        {
+            Label(FilterLabels[0]);
+            ImGui.SetNextItemWidth(MenuFonts * ImGui.GetFontSize());
+            if (StudioControls.BeginCombo("##item-type", typeFilter ?? Any))
+            {
+                if (ImGui.Selectable(Any, typeFilter is null)) typeFilter = null;
+                foreach (string type in types)
+                    if (ImGui.Selectable(type, type == typeFilter)) typeFilter = type;
+                ImGui.EndCombo();
+            }
+        }
+        if (tiers.Length > 1)
+        {
+            Label(FilterLabels[1]);
+            tierFilter = (byte?)Choices(FilterLabels[1], tiers.Select(tier => ((int)tier, ItemKinds.TierName(tier))), tierFilter);
+        }
+        if (Kind == ItemKinds.Weapons)
+        {
+            Label(FilterLabels[2]);
+            damageFilter = Choices(FilterLabels[2], InvestmentDamageType.Names.Select((name, type) => (type, name)),
+                damageFilter);
+            Label(FilterLabels[3]);
+            // Ammo types count from 1.
+            ammoFilter = Choices(FilterLabels[3], InvestmentAmmoType.Names.Select((name, ammo) => (ammo + 1, name)), ammoFilter);
+        }
+        if (Kind is ItemKinds.Weapons or ItemKinds.Armor or AllItems)
+        {
+            ImGui.SetCursorPosX(controls);
+            StudioControls.Checkbox("Hide Dummies", ref hideDummies);
+            StudioUi.Tip("Display copies of gear");
+            if (dummies != 0) { ImGui.SameLine(); ImGui.TextDisabled(dummies.ToString("N0")); }
+        }
+        if (narrowing)
+        {
+            ImGui.SetCursorPosX(controls);
+            if (ImGui.Button("Clear Filters")) { typeFilter = null; tierFilter = null; damageFilter = ammoFilter = null; }
+        }
+        CompactFrames.Pop();
+    }
+
+    /**
+     * One filter's choices in a row, each a button that is lit while chosen. Pressing the chosen one clears it.
+     * @return The choice after this frame.
+     */
+    private static int? Choices(string id, IEnumerable<(int Value, string Name)> choices, int? chosen)
+    {
+        ImGui.PushID(id);
+        bool first = true;
+        foreach (var (value, name) in choices)
+        {
+            if (!first) ImGui.SameLine(0, ImGui.GetStyle().ItemInnerSpacing.X);
+            first = false;
+            bool lit = chosen == value;
+            if (lit) ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetColorU32(ImGuiCol.Header));
+            bool pressed = ImGui.Button(name);
+            if (lit) ImGui.PopStyleColor();
+            if (pressed) chosen = lit ? null : value;
+        }
+        ImGui.PopID();
+        return chosen;
     }
 
     /**
@@ -181,6 +289,7 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
             {
                 var item = shown[i];
                 ImGui.PushID(item.Index);
+                IconList.Stripe(i, height);
                 if (IconList.Row(icons, scale, item.Index == chosen, catalog, item, true, item.Name, Colour(item), item.TypeName,
                     options.Held?.Badge(item.Hash) ?? "", workspace.IsModified(item.Tag)))
                     clicked = item;
@@ -242,9 +351,11 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
     internal InvestmentItem[] Rows(StudioWorkspace workspace, InvestmentCatalog catalog, ItemCatalogOptions options)
     {
         var kindRows = Kind == AllItems ? null : workspace.CategoryRows.GetValueOrDefault(Kind) ?? [];
-        var narrowed = (Kind, search, sort, options.Candidates, options.ChangedOnly, hideDummies);
-        var built = (catalog, kindRows, options.ChangedOnly ? workspace.ProjectRevision : 0,
-            hideDummies ? workspace.NameRevision : 0);
+        // Another kind has other type lines.
+        if (filter.Kind != Kind) typeFilter = null;
+        var narrowed = (Kind, search, sort, options.Candidates, options.ChangedOnly,
+            (typeFilter, tierFilter, damageFilter, ammoFilter, hideDummies));
+        var built = (catalog, kindRows, options.ChangedOnly ? workspace.ProjectRevision : 0, workspace.NameRevision);
         if (filter == narrowed && source == built) return rows;
         if (filter != narrowed) scrollToTop = scrollToChosen = true;
         filter = narrowed; source = built;
@@ -252,14 +363,42 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
             : kindRows.Select(row => catalog.FindItem(row.Entry.TagHash)).OfType<InvestmentItem>();
         if (options.Candidates is { } only) items = items.Where(item => only.Contains(item.Index));
         if (options.ChangedOnly) items = items.Where(item => workspace.IsModified(item.Tag));
-        if (hideDummies && workspace.Names is { } names)
-            items = items.Where(item => !(names.TryGetItem(item.Tag, out var facts) && ItemKinds.IsDummy(facts)));
+        // The menu offers the type lines and tiers these rows hold, whatever the search and the choices then leave.
+        // Tier 0 is no rarity and 255 an unset one.
+        var offered = items.ToList();
+        types = [.. offered.Select(item => item.TypeName).Where(type => type.Length != 0).Distinct()
+            .Order(StringComparer.CurrentCultureIgnoreCase)];
+        tiers = [.. offered.Select(item => item.Tier).Where(tier => tier is not (0 or byte.MaxValue)).Distinct().Order()];
+        items = offered;
+        if (typeFilter is { } type) items = items.Where(item => item.TypeName == type);
+        if (tierFilter is { } tier) items = items.Where(item => item.Tier == tier);
+        if (Kind == ItemKinds.Weapons && (damageFilter is not null || ammoFilter is not null)
+            && workspace.Catalog is { } packages)
+        {
+            var known = WeaponFacts.GetValue(catalog, _ => []);
+            items = items.Where(item => Facts(known, catalog, packages, item) is var (damage, ammo)
+                && (damageFilter is null || damage == damageFilter) && (ammoFilter is null || ammo == ammoFilter));
+        }
         string[] words = BrowserRowFilter.Words(search);
         if (words.Length != 0)
             items = items.Where(item => SearchText(item) is var text
                 && words.All(word => text.Contains(word, StringComparison.OrdinalIgnoreCase)));
-        rows = Ordered(items, sort).ToArray();
+        // Dummies are counted among the rows the search and the other filters keep, then left out when hidden.
+        var listed = items.ToList();
+        var real = workspace.Names is { } names
+            ? listed.Where(item => !(names.TryGetItem(item.Tag, out var facts) && ItemKinds.IsDummy(facts))).ToList() : listed;
+        dummies = listed.Count - real.Count;
+        rows = Ordered(hideDummies ? real : listed, sort).ToArray();
         return rows;
+    }
+
+    /** A weapon's damage type and ammo type, read once; null for one that does not read or an installation with no markers. */
+    private static (int? Damage, int? Ammo) Facts(Dictionary<uint, (int? Damage, int? Ammo)> known, InvestmentCatalog catalog,
+        PackageCatalog packages, InvestmentItem item)
+    {
+        if (known.TryGetValue(item.Tag, out var facts)) return facts;
+        int? damage = InvestmentDamageType.Installed(catalog) ? InvestmentDamageType.ReadWeapon(catalog, packages, item) : null;
+        return known[item.Tag] = (damage, InvestmentAmmoType.Read(packages, item));
     }
 
     /** The items in one of the sort menu's orders: by name, rarest tier first, or by type line. Names order equal ones. */
@@ -281,7 +420,7 @@ internal sealed class ItemCatalogView(bool kindMenu = true)
 
     private static uint Colour(InvestmentItem item) => ImGui.GetColorU32(StudioTheme.Rarity(item.Tier));
 
-    /** The game's own tooltip for an item, or, where the game's character holds items, the name, type and what is held. */
+    /** The game's tooltip for an item, or, where a character holds items, its name, type and contents. */
     private static void DrawTip(InvestmentItem item, LiveHeldIndex? held)
     {
         if (held is null) AssetTooltip.Draw(item.Tag, item.Name, item.TypeName);

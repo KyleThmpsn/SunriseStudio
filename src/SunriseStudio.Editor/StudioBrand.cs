@@ -82,6 +82,15 @@ public static class StudioBrand
         return result;
     }
 
+    /** The Lucide icon face's bytes. */
+    public static byte[] IconFace()
+    {
+        using var stream = Open("SunriseStudio.Icons");
+        using var bytes = new MemoryStream();
+        stream.CopyTo(bytes);
+        return bytes.ToArray();
+    }
+
     private static Stream Open(string name) => typeof(StudioBrand).Assembly.GetManifestResourceStream(name)
         ?? throw new InvalidDataException("The Sunrise icon is missing.");
 }

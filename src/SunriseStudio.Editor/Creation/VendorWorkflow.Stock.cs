@@ -1,6 +1,7 @@
 using System.Globalization;
 using ImGuiNET;
 using SunriseStudio.Formats;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor.Creation;
 
@@ -73,7 +74,7 @@ public sealed partial class VendorWorkflow
             var row = sales[index];
             if (saleSearch.Length != 0 && !row.Label.Contains(saleSearch, StringComparison.OrdinalIgnoreCase)) continue;
             ImGui.PushID(index);
-            bool expanded = ImGui.CollapsingHeader($"{row.Label}##sale");
+            bool expanded = StudioControls.CollapsingHeader($"{row.Label}##sale");
             ImGui.SameLine();
             if (ImGui.SmallButton("Remove")) { sales.RemoveAt(index); CreationWidgets.Reset(); ImGui.PopID(); break; }
             if (expanded)

@@ -1,5 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -109,7 +110,7 @@ public sealed partial class StudioForm
         if (node.Panel != StudioPanelKind.Empty) TrackAreaFocus(node.Panel == StudioPanelKind.MissionGraph);
         float button = ImGui.GetFrameHeight();
         ImGui.SetNextItemWidth(Math.Max(button, size.X - button - 16 * scale));
-        if (ImGui.BeginCombo("##editor-type", PanelTitle(node.Panel)))
+        if (StudioControls.BeginCombo("##editor-type", PanelTitle(node.Panel)))
         {
             foreach (var kind in Enum.GetValues<StudioPanelKind>())
             {

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Numerics;
 using ImGuiNET;
 using SunriseStudio.Formats;
 using SunriseStudio.Rendering;
@@ -93,96 +92,13 @@ public sealed partial class InvestmentPage : IPreparedStudioPage, IFramePrepared
         else if (workspace.InvestmentDetailCurrent && workspace.SelectedInvestmentItem is { } item) DrawItem(context, catalog, item);
         else if (workspace.InvestmentDetailCurrent && workspace.SelectedInvestmentVendor is { } vendor) DrawVendor(context, catalog, vendor);
         else if (workspace.Document is { } document && catalog.FindItem(document.Entry.TagHash) is { } linked)
-        { ImGui.TextUnformatted(linked.Name); if (ImGui.Button("Open item definition")) workspace.Select(linked.Tag); }
+            DrawDisplay(context, catalog, linked, document.Bytes);
         else if (workspace.Document is { } shown && catalog.FindVendor(shown.Entry.TagHash) is { } seller)
         { ImGui.TextUnformatted(seller.Name); if (ImGui.Button("Open vendor")) workspace.Select(seller.Tag); }
         else ImGui.TextDisabled("Not an item or vendor");
         DrawEdit(context, catalog);
         DrawAddRow(context, catalog);
         DrawCostEditor(context, catalog);
-    }
-
-    /** Icon, name, fields, base stats, sockets and perks of one item; values open the edit popup. */
-    private void DrawItem(StudioPageContext context, InvestmentCatalog catalog, InvestmentItemDetail detail)
-    {
-        var item = detail.Item;
-        if (icon is not null)
-        {
-            float scale = 84f / Math.Max(icon.Width, icon.Height);
-            ImGui.Image(icon.ImGuiId, new Vector2(icon.Width, icon.Height) * scale);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Item icon");
-            ImGui.SameLine();
-        }
-        ImGui.BeginGroup();
-        string name = StudioUi.Fit(item.Name, ImGui.GetContentRegionAvail().X - StudioLiveLink.Room());
-        ImGui.TextColored(StudioTheme.Rarity(item.Tier), name);
-        StudioUi.Tip((name == item.Name ? "" : item.Name + "\n") + $"Item {item.Index}\n{item.Hash:X8}");
-        StudioLiveLink.Draw(context, StudioLiveLink.ItemTarget(item));
-        ImGui.TextDisabled($"{item.Rarity}  {item.TypeName}");
-        DrawHeaderNotice(context, detail);
-        ImGui.EndGroup();
-        if (item.Description.Length != 0) ImGui.TextWrapped(item.Description);
-        DrawPursuitRow(context, detail);
-        ImGui.Spacing();
-        if (item.DisplayTag != 0 && ImGui.SmallButton("Display strings")) context.Workspace.Select(item.DisplayTag);
-        DrawObjectives(context, catalog, detail);
-        ImGui.SeparatorText("ITEM");
-        foreach (var field in detail.Fields) Field(context, field, field.Offset == ItemFields.Tier ? item.Rarity : null);
-        DrawBucket(context, item);
-        if (detail.Stats.Count != 0 || context.Workspace.CanEdit)
-        {
-            ImGui.SeparatorText("BASE STATS");
-            AddRowButton(context, false);
-            var zero = detail.Stats.Where(stat => stat.Value == 0).ToArray();
-            foreach (var stat in detail.Stats.Where(stat => stat.Value != 0)) StatRow(context, detail, stat);
-            if (zero.Length != 0 && ImGui.TreeNode($"Zero stats ({zero.Length})###zero-stats"))
-            {
-                foreach (var stat in zero) StatRow(context, detail, stat);
-                ImGui.TreePop();
-            }
-        }
-        if (detail.Sockets.Count != 0)
-        {
-            ImGui.SeparatorText("SOCKETS");
-            foreach (var socket in detail.Sockets)
-            {
-                ImGui.PushID(socket.Index);
-                ImGui.TextDisabled($"Socket {socket.Index + 1}");
-                StudioUi.Tip($"Type {socket.Type}");
-                if (ImGui.Selectable(socket.PlugName + "##plug"))
-                {
-                    BeginEdit(context, socket.PlugField);
-                    plugOptions = PlugOptions(socket);
-                    plugPicker.Chosen = socket.InitialPlug;
-                    plugPicker.Reset();
-                }
-                if (socket.InitialPlug < catalog.Items.Count)
-                { ImGui.SameLine(); if (ImGui.SmallButton("Open")) context.Workspace.Select(catalog.Items[socket.InitialPlug].Tag); }
-                ImGui.PopID();
-            }
-        }
-        if (detail.Perks.Count != 0 || context.Workspace.CanEdit)
-        {
-            ImGui.SeparatorText("PERKS");
-            AddRowButton(context, true);
-            foreach (var perk in detail.Perks)
-            {
-                ImGui.PushID(perk.Field.Offset);
-                if (perkIcons.TryGetValue(perk.Index, out var perkIcon))
-                { ImGui.Image(perkIcon.ImGuiId, new Vector2(24, 24)); ImGui.SameLine(); }
-                string description = perk.Index < catalog.PerkCount ? catalog.PerkDefinitions[perk.Index].Description ?? "" : "";
-                Field(context, perk.Field with { Name = PerkLabel(context, catalog, perk.Index) }, tip: description);
-                if (perk.Conditional) { ImGui.SameLine(); ImGui.TextDisabled("Conditional"); }
-                ImGui.SameLine(); ImGui.BeginDisabled(!context.Workspace.CanEdit);
-                if (ImGui.SmallButton("-##remove")) context.Workspace.Run(() => context.Workspace.RemoveInvestmentPerk(perk));
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Remove perk");
-                ImGui.EndDisabled();
-                ImGui.PopID();
-            }
-        }
-        Report("Read errors", detail.Diagnostics);
-        string error = iconError.Length != 0 ? iconError : context.Workspace.InvestmentIconError;
-        Report("Icon errors", error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     /** Draws a notice under the type line for an objective block that no pursuit page can classify. */
@@ -255,27 +171,6 @@ public sealed partial class InvestmentPage : IPreparedStudioPage, IFramePrepared
         context.ShowPage?.Invoke(BucketsPage.PageId, BucketsPage.RowOf(item.Bucket));
     }
 
-    /** One base stat row; the bar shows only for values above zero. */
-    private void StatRow(StudioPageContext context, InvestmentItemDetail detail, InvestmentStat stat)
-    {
-        ImGui.PushID(stat.Field.Offset);
-        ImGui.TextUnformatted(stat.Name); ImGui.SameLine();
-        ImGui.SetNextItemWidth(-1);
-        var curve = DisplayCurve(detail, stat);
-        int displayed = curve?.Evaluate(stat.Value) ?? stat.Value;
-        string valueLabel = displayed.ToString(CultureInfo.InvariantCulture) + (stat.Index == 24 ? " base" : "");
-        if (ImGui.SmallButton(valueLabel)) BeginEdit(context, stat.Field);
-        StudioUi.Tip(curve is null ? "Base value" : $"Base {stat.Value}, shows {displayed}");
-        if (stat.Conditional || stat.Computed)
-        { ImGui.SameLine(); ImGui.TextDisabled(stat.Computed ? "Computed" : "Conditional"); }
-        ImGui.SameLine(); ImGui.BeginDisabled(!context.Workspace.CanEdit);
-        if (ImGui.SmallButton("-##remove")) context.Workspace.Run(() => context.Workspace.RemoveInvestmentStat(stat));
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Remove stat");
-        ImGui.EndDisabled();
-        if (stat.Value is > 0 and <= 100) ImGui.ProgressBar(stat.Value / 100f, new(-1, 5), "");
-        ImGui.PopID();
-    }
-
     /** Authored names win; the name index's owner label covers perks the game leaves unnamed. */
     private static string PerkLabel(StudioPageContext context, InvestmentCatalog catalog, int index) =>
         index < catalog.PerkCount && catalog.PerkDefinitions[index].Name.Length != 0 ? catalog.PerkDefinitions[index].Name
@@ -338,7 +233,7 @@ public sealed partial class InvestmentPage : IPreparedStudioPage, IFramePrepared
                 popup.Value = plug.Index.ToString(CultureInfo.InvariantCulture);
             if (field.Offset != ItemFields.Tier || detail is null) return false;
             ImGui.SetNextItemWidth(350);
-            if (ImGui.BeginCombo("##investmentValue",
+            if (StudioControls.BeginCombo("##investmentValue",
                 byte.TryParse(popup.Value, out byte current) ? ItemKinds.TierName(current) : popup.Value))
             {
                 foreach (byte value in new byte[] { 0, 1, 2, 3, 4, 5, 255 })
@@ -350,9 +245,14 @@ public sealed partial class InvestmentPage : IPreparedStudioPage, IFramePrepared
         {
             var stat = detail?.Stats.FirstOrDefault(row => row.Field.Offset == field.Offset);
             var curve = stat is not null && detail is not null ? DisplayCurve(detail, stat) : null;
+            // The stat rows' reading of this item: what its plugs add.
+            var sources = stat is not null && ReferenceEquals(plugStats.Detail, detail)
+                ? plugStats.Plugs.GetValueOrDefault(stat.Index) : null;
+            int plugs = StatSources.Sum(sources, false) + StatSources.Sum(sources, true);
             if (curve is not null
                 && int.TryParse(popup.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int previewValue))
-                ImGui.TextDisabled(previewValue == 0 ? "Uses item-level context" : $"Display {curve.Evaluate(previewValue)}");
+                ImGui.TextDisabled(previewValue == 0 ? "Uses item-level context"
+                    : $"Display {curve.Evaluate(previewValue + plugs)}");
         });
     }
 
@@ -364,7 +264,7 @@ public sealed partial class InvestmentPage : IPreparedStudioPage, IFramePrepared
 
     private static void Report(string title, IReadOnlyList<string> errors)
     {
-        if (errors.Count == 0 || !ImGui.CollapsingHeader($"{title} ({errors.Count})###{title}")) return;
+        if (errors.Count == 0 || !StudioControls.CollapsingHeader($"{title} ({errors.Count})###{title}")) return;
         StudioUi.Facts(title, errors);
     }
     private static InvestmentStatCurve? DisplayCurve(InvestmentItemDetail detail, InvestmentStat stat) =>

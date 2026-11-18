@@ -190,7 +190,7 @@ internal sealed class SeasonPassGrid
     {
         if (ladder.Outside.Length == 0) return;
         if (revealOutside) { ImGui.SetNextItemOpen(true); revealOutside = false; }
-        if (!ImGui.CollapsingHeader($"Outside ranks 1-{ladder.Ranks} ({ladder.Outside.Length})###pass-outside")) return;
+        if (!StudioControls.CollapsingHeader($"Outside ranks 1-{ladder.Ranks} ({ladder.Outside.Length})###pass-outside")) return;
         foreach (int index in ladder.Outside)
         {
             var row = shown.Rewards[index];

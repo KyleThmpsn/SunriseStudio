@@ -33,7 +33,7 @@ public sealed partial class MissionGraphPage
             if (ImGuiIcons.Button("open-" + callback.Key, StudioIcon.Open, "Open " + callback.CallbackPath)) OpenGroup(BodyKey(callback.Key));
         }
         if (DrawTypedInspector(node, editable)) return;
-        if (!ImGui.CollapsingHeader("Advanced Lua")) return;
+        if (!StudioControls.CollapsingHeader("Advanced Lua")) return;
         foreach (var property in node.Table.Fields.Where(value => value.Name is not (null or "id")))
             if (ImGui.Selectable(Friendly(property.Name!) + "##" + property.Name, advancedField == property.Name))
             { advancedField = property.Name!; advancedValue = property.Value.Read(graph.Source); }
@@ -112,7 +112,7 @@ public sealed partial class MissionGraphPage
                 foreach (var other in group.Nodes.Where(value => value.Key != node.Key))
                 {
                     bool checkedValue = node.Dependencies?.Contains(other.Id) == true;
-                    if (ImGui.Checkbox(Friendly(other.Id) + "##after-" + other.Key, ref checkedValue))
+                    if (StudioControls.Checkbox(Friendly(other.Id) + "##after-" + other.Key, ref checkedValue))
                     { Change(document => document.Connect(other.Key, node.Key, checkedValue)); return true; }
                 }
             }
@@ -144,7 +144,7 @@ public sealed partial class MissionGraphPage
         string? expression = graph!.Field(node, path)?.Value.Read(graph.Source);
         if (expression is not (null or "true" or "false" or "nil")) { ImGui.TextDisabled(label + ": Custom Lua"); return FieldLua(node, path); }
         bool value = expression == "true";
-        if (!ImGui.Checkbox(label, ref value)) return false;
+        if (!StudioControls.Checkbox(label, ref value)) return false;
         Change(document => document.SetField(node, path, value ? "true" : "false")); return true;
     }
 
@@ -154,7 +154,7 @@ public sealed partial class MissionGraphPage
         var candidates = graph!.NodesIn(group, collection);
         var current = graph.Field(node.Key, path); string? value = current?.StringValue;
         ImGui.TextDisabled(label); ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo("##" + path, value is not null ? Friendly(value) : current is null ? "None" : "Custom Lua"))
+        if (!StudioControls.BeginCombo("##" + path, value is not null ? Friendly(value) : current is null ? "None" : "Custom Lua"))
             return current is not null && value is null && FieldLua(node.Key, path);
         bool changed = false;
         if (ImGui.Selectable("None", current is null) && current is not null)
@@ -216,7 +216,7 @@ public sealed partial class MissionGraphPage
         chosen = current; bool changed = false;
         if (label.Length > 0) ImGui.TextDisabled(label);
         ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo("##pick-" + label, current?.Name ?? emptyLabel ?? (allowNone ? "None" : "Choose"))) return false;
+        if (!StudioControls.BeginCombo("##pick-" + label, current?.Name ?? emptyLabel ?? (allowNone ? "None" : "Choose"))) return false;
         if (ImGui.IsWindowAppearing()) pickerSearch = "";
         ImGui.SetNextItemWidth(-1); ImGui.InputTextWithHint("##find", "Find reference", ref pickerSearch, 256);
         if (allowNone && ImGui.Selectable("None", current is null)) { chosen = null; changed = true; }
@@ -235,7 +235,7 @@ public sealed partial class MissionGraphPage
         var legs = graph!.NodesIn(group, "legs");
         string selectedLeg = current;
         ImGui.TextDisabled("Arm in leg"); ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo("##leg", legs.FirstOrDefault(value => value.Key == selectedLeg)?.Id ?? "Choose leg")) return;
+        if (!StudioControls.BeginCombo("##leg", legs.FirstOrDefault(value => value.Key == selectedLeg)?.Id ?? "Choose leg")) return;
         foreach (var leg in legs) if (ImGui.Selectable(Friendly(leg.Id) + "##" + leg.Key, leg.Key == current)) current = leg.Key;
         ImGui.EndCombo();
     }

@@ -8,4 +8,6 @@ internal static class ItemFields
 {
     public static readonly int Tier = TagView.FieldOffset<ItemDefinition>("InventoryItemBlock.Tier");
     public static readonly int Bucket = TagView.FieldOffset<ItemDefinition>("InventoryItemBlock.InventoryBucket");
+    public static readonly int MaximumStack = TagView.FieldOffset<ItemDefinition>("InventoryItemBlock.MaximumStack");
+    public static readonly int Instanced = TagView.FieldOffset<ItemDefinition>("InventoryItemBlock.Instanced");
 }

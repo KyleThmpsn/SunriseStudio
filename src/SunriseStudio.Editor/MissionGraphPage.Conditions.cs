@@ -1,5 +1,6 @@
 using ImGuiNET;
 using SunriseStudio.Missions;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -37,7 +38,7 @@ public sealed partial class MissionGraphPage
         string kind = condition switch { null => "Immediately", MissionFactCondition => "Fact",
             MissionConditionGroup group => group.All ? "All" : "Any", _ => "Custom Lua" };
         ImGui.SetNextItemWidth(-1);
-        if (ImGui.BeginCombo("##condition-kind", kind))
+        if (StudioControls.BeginCombo("##condition-kind", kind))
         {
             if (root && ImGui.Selectable("Immediately", condition is null)) replacement = null;
             ImGui.BeginDisabled(facts.Count == 0);
@@ -54,7 +55,7 @@ public sealed partial class MissionGraphPage
         if (condition is MissionFactCondition leaf)
         {
             ImGui.SetNextItemWidth(-1);
-            if (ImGui.BeginCombo("##fact", Friendly(leaf.Fact)))
+            if (StudioControls.BeginCombo("##fact", Friendly(leaf.Fact)))
             {
                 foreach (string fact in facts)
                     if (ImGui.Selectable(Friendly(fact) + "##" + fact, fact == leaf.Fact)) replacement = new MissionFactCondition(fact);

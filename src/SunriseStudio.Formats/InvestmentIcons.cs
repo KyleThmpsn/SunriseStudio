@@ -5,14 +5,11 @@ using SunriseStudio.Tags.Views;
 
 namespace SunriseStudio.Formats;
 
-/**
- * An icon's artwork, the bitmap authoring replaces, and every layer in the order the game draws them: the rarity
- * plate, the artwork, the season watermark and the foreground.
- */
+/** An icon's artwork, the bitmap authoring replaces, and its layers in draw order: plate, artwork, watermark, foreground. */
 public sealed record InvestmentIcon(uint ContainerTag, uint BitmapTag, TextureData Texture,
     IReadOnlyList<TextureData> Layers);
 
-/** The shared tables icon reads use, each read on first use, so many reads can share one copy. */
+/** Shared tables for icon reads, each read on first use. */
 internal struct InvestmentIconTables
 {
     public byte[]? Icons, Art;
@@ -95,8 +92,8 @@ public sealed partial class InvestmentCatalog
     }
 
     /**
-     * A container's layers each name a bitmap. No artwork means no icon; another layer whose bitmap is missing, of
-     * another class or unreadable is left out. An empty watermark slot takes the artwork of the item's watermark container.
+     * A container's layers each name a bitmap. No artwork means no icon; a missing or unreadable layer is left out, and
+     * an empty watermark slot takes the item's watermark container's artwork.
      */
     private InvestmentIcon? ReadContainer(uint containerTag, uint watermark, CancellationToken token)
     {
@@ -132,7 +129,7 @@ public sealed partial class InvestmentCatalog
     }
 }
 
-/** Reads many item icons with one copy of the shared tables, which ReadIcon reads again on every call. Not thread-safe. */
+/** Reads many item icons over one copy of the shared tables. Not thread-safe. */
 public sealed class InvestmentIconReader(InvestmentCatalog catalog)
 {
     private InvestmentIconTables tables;

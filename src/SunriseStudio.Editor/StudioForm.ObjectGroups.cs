@@ -244,7 +244,7 @@ public sealed partial class StudioForm
     {
         if (workspace.World is null || workspace.Project is not { } project) return;
         var groups = project.ObjectGroups;
-        if (!ImGui.CollapsingHeader($"Groups ({groups.Count})###object-groups", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        if (!StudioControls.CollapsingHeader($"Groups ({groups.Count})###object-groups", ImGuiTreeNodeFlags.DefaultOpen)) return;
         var target = GroupCandidate(out string reason);
         bool grouped = target is not null && GroupOf(target.Key) is not null;
         ImGui.BeginDisabled(!workspace.CanEdit || target is null || grouped);
@@ -279,7 +279,7 @@ public sealed partial class StudioForm
         {
             ImGui.BeginDisabled(target is null);
             ImGui.SetNextItemWidth(-1);
-            if (ImGui.BeginCombo("##add-to-group", "Add to group"))
+            if (StudioControls.BeginCombo("##add-to-group", "Add to group"))
             {
                 foreach (var each in project.ObjectGroups)
                 {
@@ -328,7 +328,7 @@ public sealed partial class StudioForm
         if (ImGui.Button("Delete group")) RemoveGroup(group);
         ImGui.EndDisabled();
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Removes the group only; its objects and their edits stay.");
-        if (ImGui.CollapsingHeader("Transform group", ImGuiTreeNodeFlags.DefaultOpen))
+        if (StudioControls.CollapsingHeader("Transform group", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.BeginDisabled(!workspace.CanEdit || present.Count == 0 && group.CollisionParts is not { Count: > 0 });
             ImGui.TextDisabled("Move by"); ImGui.SetNextItemWidth(-1); ImGui.InputFloat3("##group-move", ref groupMove, "%.3f");
@@ -342,7 +342,7 @@ public sealed partial class StudioForm
                     : DegreesToQuaternion(groupTurn), groupScale));
             ImGui.EndDisabled();
         }
-        if (ImGui.CollapsingHeader("Objects", ImGuiTreeNodeFlags.DefaultOpen))
+        if (StudioControls.CollapsingHeader("Objects", ImGuiTreeNodeFlags.DefaultOpen))
         {
             foreach (var (member, source) in present)
             {
@@ -371,7 +371,7 @@ public sealed partial class StudioForm
             }
         }
         bool partsOpen = group.CollisionParts is { } parts
-            && ImGui.CollapsingHeader($"Collision parts ({parts.Count:N0})###group-parts", ImGuiTreeNodeFlags.DefaultOpen);
+            && StudioControls.CollapsingHeader($"Collision parts ({parts.Count:N0})###group-parts", ImGuiTreeNodeFlags.DefaultOpen);
         if (group.CollisionParts is not null) StudioUi.Tip("They move with the group");
         if (partsOpen)
         {

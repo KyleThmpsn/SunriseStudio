@@ -21,7 +21,6 @@ public sealed partial class StudioWorkspace
         {
             var shaderDyes = NativeGearPlating.ReadItemDyes(catalog, document.Bytes, out string? shaderError);
             var shown = ReadGuardianItemDocument(catalog, document, context, shaderDyes);
-            shown.Scene?.Diagnostics.Add(GuardianArt.ShowcaseNote);
             if (shaderDyes is null) shown.Scene?.Diagnostics.Add($"Dyes: unreadable, using the armor's own ({shaderError})");
             return shown;
         }

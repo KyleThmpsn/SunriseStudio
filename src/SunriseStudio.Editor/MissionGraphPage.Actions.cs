@@ -1,5 +1,6 @@
 using ImGuiNET;
 using SunriseStudio.Missions;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -32,7 +33,7 @@ public sealed partial class MissionGraphPage
         if (!ImGui.BeginPopup("Edit flow action")) return;
         var draft = actionDraft!;
         ImGui.SetNextItemWidth(320);
-        if (ImGui.BeginCombo("Action type", TemplateName(draft.Kind)))
+        if (StudioControls.BeginCombo("Action type", TemplateName(draft.Kind)))
         {
             foreach (var kind in FlowActions)
                 if (ImGui.Selectable(TemplateName(kind), kind == draft.Kind)) draft = new(kind);
@@ -113,7 +114,7 @@ public sealed partial class MissionGraphPage
             : group.IsFlowSteps ? [.. FlowActions]
             : group.IsFlowFacts ? [MissionNodeTemplate.TriggerFact, MissionNodeTemplate.SceneOutputFact] : [];
         ImGui.SetNextItemWidth(320); ImGui.InputText("Node id", ref newId, 64);
-        if (ImGui.BeginCombo("Template", TemplateName(templateDraft.Kind)))
+        if (StudioControls.BeginCombo("Template", TemplateName(templateDraft.Kind)))
         {
             foreach (var item in templates)
                 if (ImGui.Selectable(TemplateName(item), item == templateDraft.Kind)) templateDraft = new(item);

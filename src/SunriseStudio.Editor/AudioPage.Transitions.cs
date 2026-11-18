@@ -1,5 +1,6 @@
 using ImGuiNET;
 using SunriseStudio.Audio;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -21,7 +22,7 @@ public sealed partial class AudioPage
             transitionContainer = analysis.TransitionContainers.Values.OrderByDescending(value => value.Rules.Count).First().Id;
         ImGui.SetNextItemWidth(310);
         bool changed = false;
-        if (ImGui.BeginCombo("Container", analysis.TransitionContainers[transitionContainer].Name))
+        if (StudioControls.BeginCombo("Container", analysis.TransitionContainers[transitionContainer].Name))
         {
             foreach (var container in analysis.TransitionContainers.Values)
                 if (ImGui.Selectable(container.Name + "##" + container.Id, container.Id == transitionContainer))
@@ -39,13 +40,13 @@ public sealed partial class AudioPage
         }
         SegmentPicker("Source", ref transitionSource);
         ImGui.BeginDisabled(transitionPlaylists.Count == 0);
-        if (ImGui.Checkbox("Playlist destination", ref transitionToPlaylist))
+        if (StudioControls.Checkbox("Playlist destination", ref transitionToPlaylist))
             transitionDestination = transitionToPlaylist ? transitionPlaylists.FirstOrDefault()?.Id ?? 0 : transitionSegments.FirstOrDefault()?.Id ?? 0;
         ImGui.EndDisabled();
         if (transitionToPlaylist)
         {
             ImGui.SetNextItemWidth(310);
-            if (ImGui.BeginCombo("Destination", analysis.Playlists.GetValueOrDefault(transitionDestination)?.Name ?? "Choose playlist"))
+            if (StudioControls.BeginCombo("Destination", analysis.Playlists.GetValueOrDefault(transitionDestination)?.Name ?? "Choose playlist"))
             {
                 foreach (var playlist in transitionPlaylists)
                     if (ImGui.Selectable(playlist.Name + "##" + playlist.Id, playlist.Id == transitionDestination)) transitionDestination = playlist.Id;
@@ -93,7 +94,7 @@ public sealed partial class AudioPage
     {
         ImGui.SetNextItemWidth(310);
         uint current = selected;
-        if (!ImGui.BeginCombo(label, selected == 0 ? "Nothing" : transitionSegments.FirstOrDefault(value => value.Id == current)?.Name ?? "Choose segment")) return;
+        if (!StudioControls.BeginCombo(label, selected == 0 ? "Nothing" : transitionSegments.FirstOrDefault(value => value.Id == current)?.Name ?? "Choose segment")) return;
         if (ImGui.Selectable("Nothing", selected == 0)) selected = 0;
         foreach (var segment in transitionSegments)
             if (ImGui.Selectable(segment.Name + "##" + segment.Id, segment.Id == selected)) selected = segment.Id;

@@ -60,10 +60,43 @@ public sealed partial class AssetViewport
         Camera.SetEye(spawn.Position + Vector3.UnitZ * PlayerEyeHeight, yaw, 0);
     }
 
+    // The view the controller flies, and when it last drew. Another view takes the controller once that one has not
+    // drawn for PadHandover milliseconds.
+    private static AssetViewport? padView;
+    private static long padViewDrawn;
+    private const long PadHandover = 250;
+
+    /** True when the controller flies this view: the pointer is over it, or it is the last such view still drawn. */
+    private bool TakesPad(bool hovered)
+    {
+        long now = Environment.TickCount64;
+        if (hovered || padView is null || now - padViewDrawn > PadHandover) padView = this;
+        if (!ReferenceEquals(padView, this)) return false;
+        padViewDrawn = now;
+        return true;
+    }
+
+    // The player camera's turn rate at full stick, in the pixels of mouse travel Look takes per second.
+    private const float PadLookRate = 600;
+
+    /** A controller flies the eye where it looks, whether or not the view is hovered; the D-pad steps the speed. */
+    private void MoveWithPad()
+    {
+        var pad = Gamepad.Current;
+        var io = ImGui.GetIO();
+        ScalePlayerSpeed(pad.SpeedStep);
+        var turn = pad.Look * PadLookRate * io.DeltaTime;
+        if (turn != Vector2.Zero) Camera.Look(turn.X, -turn.Y);
+        var local = new Vector3(pad.Move.X, pad.Move.Y, pad.Rise);
+        if (local != Vector3.Zero)
+            Camera.Fly(local, io.DeltaTime, PlayerSpeed * playerSpeedScale * (pad.Sprint ? SprintFactor : 1));
+    }
+
     /** Movement reads held keys every frame while the view is hovered or the look drag holds it. */
     private void MovePlayer(bool active)
     {
         var io = ImGui.GetIO();
+        if (ReferenceEquals(padView, this)) MoveWithPad();
         if (!active || io.WantTextInput) return;
         var local = Vector3.Zero;
         if (ImGui.IsKeyDown(ImGuiKey.W)) local.Y += 1;
@@ -99,7 +132,7 @@ public sealed partial class AssetViewport
             const float Width = 150;
             next(Width);
             ImGui.SetNextItemWidth(Width);
-            if (ImGui.BeginCombo("##teleport-spawn", "Teleport to spawn", ImGuiComboFlags.HeightLarge))
+            if (StudioControls.BeginCombo("##teleport-spawn", "Teleport to spawn", ImGuiComboFlags.HeightLarge))
             {
                 for (int index = 0; index < spawns.Count; index++)
                     if (ImGui.Selectable($"{Name(spawns[index]) ?? "Spawn point"}##spawn{index}")) TeleportTo(spawns[index]);

@@ -1,6 +1,7 @@
 using ImGuiNET;
 using SunriseStudio.Missions;
 using static SunriseStudio.Editor.StudioUi;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -59,7 +60,7 @@ public sealed partial class MissionGraphPage
         if (catalog is not { } installed) { ImGui.CloseCurrentPopup(); ImGui.EndPopup(); return; }
         if (newFlowProblem.Length > 0) Problem(newFlowProblem);
         ImGui.SetNextItemWidth(360);
-        if (ImGui.BeginCombo("Activity", newActivity is null ? "Choose activity" : Friendly(newActivity.Key.ToLowerInvariant())))
+        if (StudioControls.BeginCombo("Activity", newActivity is null ? "Choose activity" : Friendly(newActivity.Key.ToLowerInvariant())))
         {
             ImGui.SetNextItemWidth(-1); ImGui.InputTextWithHint("##find-activity", "Find activity", ref newActivitySearch, 128);
             foreach (var activity in installed.Activities.Where(value => newActivitySearch.Length == 0

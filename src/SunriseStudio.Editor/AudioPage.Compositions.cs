@@ -1,5 +1,6 @@
 using ImGuiNET;
 using SunriseStudio.Audio;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -18,7 +19,7 @@ public sealed partial class AudioPage
     /** Authored choices regenerate a distinct composition instead of changing the loaded bank. */
     private void DrawCompositionOptions()
     {
-        if (session?.Document.Bank is null || !ImGui.CollapsingHeader("Composition controls")) return;
+        if (session?.Document.Bank is null || !StudioControls.CollapsingHeader("Composition controls")) return;
         var active = session;
         if (active.Analysis is not { } analysis)
         {
@@ -29,17 +30,17 @@ public sealed partial class AudioPage
         }
         ImGui.BeginDisabled(IsBusy);
         ImGui.SetNextItemWidth(110); ImGui.SliderInt("Preview loops", ref previewLoops, 1, 16);
-        ImGui.Checkbox("Initial delay", ref initialDelay); ImGui.SameLine();
-        ImGui.Checkbox("Effect gain", ref effectVolumes);
+        StudioControls.Checkbox("Initial delay", ref initialDelay); ImGui.SameLine();
+        StudioControls.Checkbox("Effect gain", ref effectVolumes);
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Volume only; no filters or reverb.");
-        ImGui.SameLine(); ImGui.Checkbox("Random variants", ref randomChoices);
+        ImGui.SameLine(); StudioControls.Checkbox("Random variants", ref randomChoices);
         foreach (var group in analysis.GameSyncs)
         {
             var key = (group.Id, group.Switch);
             string current = gameSyncSelections.TryGetValue(key, out uint value)
                 ? group.Choices.FirstOrDefault(choice => choice.Value == value)?.Name ?? value.ToString() : "Automatic";
             ImGui.PushID($"sync:{group.Id}:{group.Switch}"); ImGui.SetNextItemWidth(250);
-            if (ImGui.BeginCombo(group.Name, current))
+            if (StudioControls.BeginCombo(group.Name, current))
             {
                 if (ImGui.Selectable("Automatic", !gameSyncSelections.ContainsKey(key))) gameSyncSelections.Remove(key);
                 foreach (var choice in group.Choices)
@@ -56,7 +57,7 @@ public sealed partial class AudioPage
             {
                 ImGui.PushID(unchecked((int)parameter.Id));
                 bool enabled = parameterValues.ContainsKey(parameter.Id);
-                if (ImGui.Checkbox(parameter.Name, ref enabled))
+                if (StudioControls.Checkbox(parameter.Name, ref enabled))
                 { if (enabled) parameterValues[parameter.Id] = parameter.Minimum; else parameterValues.Remove(parameter.Id); }
                 if (enabled)
                 {
@@ -82,7 +83,7 @@ public sealed partial class AudioPage
             ImGui.SeparatorText("MUSIC TIMELINE");
             if (!analysis.Playlists.ContainsKey(selectedPlaylist)) selectedPlaylist = DefaultPlaylist(analysis);
             ImGui.SetNextItemWidth(320);
-            if (ImGui.BeginCombo("Playlist", analysis.Playlists[selectedPlaylist].Name))
+            if (StudioControls.BeginCombo("Playlist", analysis.Playlists[selectedPlaylist].Name))
             {
                 foreach (var playlist in analysis.Playlists.Values)
                     if (ImGui.Selectable(playlist.Name + "##" + playlist.Id, selectedPlaylist == playlist.Id)) { selectedPlaylist = playlist.Id; playlistStart = 0; }
@@ -94,7 +95,7 @@ public sealed partial class AudioPage
                 playlistEntriesId = selectedPlaylist; playlistEntriesAnalysis = analysis; playlistStart = 0;
             }
             ImGui.SetNextItemWidth(320);
-            if (ImGui.BeginCombo("Start at", playlistStart == 0 ? "Beginning" : playlistEntries.First(value => value.Id == playlistStart).Name))
+            if (StudioControls.BeginCombo("Start at", playlistStart == 0 ? "Beginning" : playlistEntries.First(value => value.Id == playlistStart).Name))
             {
                 if (ImGui.Selectable("Beginning", playlistStart == 0)) playlistStart = 0;
                 foreach (var entry in playlistEntries)

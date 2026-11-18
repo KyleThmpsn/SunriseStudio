@@ -42,7 +42,7 @@ public sealed partial class StudioForm
             bool piece = current.EntityTag != 0;
             string Label(ItemWearer wearer) => piece ? $"{workspace.DisplayName(wearer.EntityTag)} - {wearer.Name}" : wearer.Name;
             ImGui.SetNextItemWidth(piece || weapon ? MathF.Max(1, width - toggle) : width);
-            if (ImGui.BeginCombo("##item-wearer", Label(current)))
+            if (StudioControls.BeginCombo("##item-wearer", Label(current)))
             {
                 foreach (var wearer in document.Wearers)
                     if (ImGui.Selectable(Label(wearer), wearer == current) && wearer != current)
@@ -67,7 +67,7 @@ public sealed partial class StudioForm
         string Name(uint entity) => entity != 0 ? workspace.DisplayName(entity)
             : $"{workspace.DisplayName(GuardianAppearance.ArrangementTable)} / Row {document.ArtArrangement}";
         ImGui.SetNextItemWidth(weapon ? MathF.Max(1, width - toggle) : width);
-        if (ImGui.BeginCombo("##animation-owner", owner != 0 || art ? Name(owner) : "Choose entity owner"))
+        if (StudioControls.BeginCombo("##animation-owner", owner != 0 || art ? Name(owner) : "Choose entity owner"))
         {
             foreach (uint candidate in art ? connections.EntityCandidates.Prepend(0u) : connections.EntityCandidates)
                 if (ImGui.Selectable(Name(candidate) + "##" + candidate, candidate == owner))

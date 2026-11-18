@@ -3,10 +3,7 @@ using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
-/**
- * Expand All and Collapse All for a page's folding rows. The button gives the rows new ids, so every row starts as the
- * button set; until it is pressed, each row keeps its own default.
- */
+/** Expand All and Collapse All for a page's folding rows; the button re-ids the rows, which otherwise keep their defaults. */
 public sealed class TreeExpansion
 {
     private bool? open;

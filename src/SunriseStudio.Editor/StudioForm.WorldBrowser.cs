@@ -19,12 +19,17 @@ public sealed partial class StudioForm
         if (ReferenceEquals(browserWorldCatalog, workspace.WorldCatalog) && browserWorldNames == workspace.NameRevision) return;
         browserWorldCatalog = workspace.WorldCatalog;
         browserWorldNames = workspace.NameRevision;
-        mapBrowserRows = workspace.WorldCatalog?.Maps.Select(map => new MapBrowserRow(map, workspace.DisplayName(map.Tag)))
+        mapBrowserRows = workspace.WorldCatalog?.Maps.Select(map => new MapBrowserRow(map, WorldName(map.Tag)))
             .OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
-        missionBrowserRows = workspace.WorldCatalog?.Missions.Select(mission => new MissionBrowserRow(mission, workspace.DisplayName(mission.Tag)))
+        missionBrowserRows = workspace.WorldCatalog?.Missions
+            .Select(mission => new MissionBrowserRow(mission, WorldName(mission.Tag)))
             .OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
         matchedMapSearch = matchedMissionSearch = null;
     }
+
+    /** A map or mission by the name the game gives it, as written; the readable label only where it has none. */
+    private string WorldName(uint tag) =>
+        workspace.Names?.Lookup(tag) is { RawName.Length: > 0 } info ? info.RawName : workspace.DisplayName(tag);
 
     /** Filtering reuses resolved names until the search text changes. */
     private MapBrowserRow[] MatchingMaps()

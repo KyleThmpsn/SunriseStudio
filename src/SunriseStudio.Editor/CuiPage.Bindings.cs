@@ -1,6 +1,7 @@
 using System.Globalization;
 using ImGuiNET;
 using SunriseStudio.Formats;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -100,7 +101,7 @@ public sealed partial class CuiPage
         {
             case CuiValueKind.Bool:
                 bool flag = value.AsBool;
-                if (ImGui.Checkbox("##input", ref flag)) bits = flag ? 1u : 0u;
+                if (StudioControls.Checkbox("##input", ref flag)) bits = flag ? 1u : 0u;
                 break;
             case CuiValueKind.Integer:
                 int number = unchecked((int)bits); ImGui.SetNextItemWidth(90);
@@ -149,7 +150,7 @@ public sealed partial class CuiPage
             ImGui.EndDisabled(); return;
         }
         ImGui.SetNextItemWidth(60);
-        ImGui.Combo("##comparison", ref bindingComparison, ComparisonSymbols, ComparisonSymbols.Length);
+        StudioControls.Combo("##comparison", ref bindingComparison, ComparisonSymbols, ComparisonSymbols.Length);
         ImGui.SameLine(); ImGui.SetNextItemWidth(110);
         ImGui.InputText("##operand", ref bindingOperand, 32);
         ImGui.SameLine();

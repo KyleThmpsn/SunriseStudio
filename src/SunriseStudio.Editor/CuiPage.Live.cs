@@ -176,7 +176,7 @@ public sealed partial class CuiPage
             requestedWidget = target; liveRecord = null; liveRecordContent = null; liveRecordAt = Environment.TickCount64;
             LiveCall(connection => connection.RequestCuiWidget(target));
         }
-        if (!ImGui.CollapsingHeader("In game now (read only)###cui-live-now", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        if (!StudioControls.CollapsingHeader("In game now (read only)###cui-live-now", ImGuiTreeNodeFlags.DefaultOpen)) return;
         if (!LiveOverlay) { ImGui.TextDisabled(LiveChip(live).Tooltip); return; }
         if (LiveStale) ImGui.TextColored(LiveWarning, "Stale: the game stopped answering");
         if (liveJoin.Row(selected.Id) is not { } row) ImGui.TextDisabled(LiveStateText(liveJoin.State(selected.Id)) + " in game");

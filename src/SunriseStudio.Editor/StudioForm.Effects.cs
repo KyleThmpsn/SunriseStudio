@@ -18,9 +18,9 @@ public sealed partial class StudioForm
         var key = selected is null ? (EffectPlacementKey?)null : EffectPlacementKey.Of(selected);
         var markers = scene.Markers.Where(marker => marker.Effect is { Kind: EffectKind.ParticleSystem }
             && (key is null || EffectPlacementKey.Of(marker) == key)).ToArray();
-        if (markers.Length == 0 || !ImGui.CollapsingHeader("Effects##effect-controls", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        if (markers.Length == 0 || !StudioControls.CollapsingHeader("Effects##effect-controls", ImGuiTreeNodeFlags.DefaultOpen)) return;
         bool showAll = effectControls.ShowAll;
-        if (ImGui.Checkbox("Show all effects", ref showAll)) effectControls.ShowAll = showAll;
+        if (StudioControls.Checkbox("Show all effects", ref showAll)) effectControls.ShowAll = showAll;
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Run every particle effect all the time, whatever starts it in the game.");
         foreach (var placement in markers.GroupBy(EffectPlacementKey.Of))
         {
@@ -32,7 +32,7 @@ public sealed partial class StudioForm
         if (selected?.Effect is { } effect)
         {
             bool forced = effectControls.Forced(selected);
-            if (ImGui.Checkbox("Force on", ref forced)) effectControls.SetForced(selected, forced);
+            if (StudioControls.Checkbox("Force on", ref forced)) effectControls.SetForced(selected, forced);
             ImGui.SameLine();
             ImGui.TextDisabled(effect.Activation?.Trigger() ?? "sequence not read");
         }
@@ -41,7 +41,7 @@ public sealed partial class StudioForm
             for (int index = 0; index < markers.Length; index++)
             {
                 bool forced = effectControls.Forced(markers[index]);
-                if (ImGui.Checkbox($"{markers[index].Name}##force{index}", ref forced)) effectControls.SetForced(markers[index], forced);
+                if (StudioControls.Checkbox($"{markers[index].Name}##force{index}", ref forced)) effectControls.SetForced(markers[index], forced);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip(markers[index].Effect!.Activation?.Trigger() ?? "sequence not read");
             }
             ImGui.TreePop();
@@ -62,7 +62,7 @@ public sealed partial class StudioForm
             string name = resolved ?? $"Channel {index + 1}";
             float value = effectControls.Channel(key, channel.Key);
             bool on = value != 0;
-            if (ImGui.Checkbox($"##on{channel.Key:X8}", ref on)) effectControls.SetChannel(key, channel.Key, on ? 1 : 0);
+            if (StudioControls.Checkbox($"##on{channel.Key:X8}", ref on)) effectControls.SetChannel(key, channel.Key, on ? 1 : 0);
             ImGui.SameLine();
             ImGui.SetNextItemWidth(70 * scale);
             if (ImGui.DragFloat($"{name}##value{channel.Key:X8}", ref value, 0.01f))

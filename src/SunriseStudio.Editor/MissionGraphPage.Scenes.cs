@@ -1,5 +1,6 @@
 using ImGuiNET;
 using SunriseStudio.Missions;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor;
 
@@ -54,7 +55,7 @@ public sealed partial class MissionGraphPage
         foreach (var input in inputs)
         {
             bool ticked = current.Contains(input);
-            bool changed = ImGui.Checkbox(input.Name + "##input-" + input.Expression, ref ticked);
+            bool changed = StudioControls.Checkbox(input.Name + "##input-" + input.Expression, ref ticked);
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(input.Expression + "\nKey " + input.Identity);
             if (!changed) continue;
             chosen = ticked ? [.. current, input] : current.Where(value => value != input).ToArray();

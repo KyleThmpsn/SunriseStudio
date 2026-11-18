@@ -34,6 +34,9 @@ public static partial class ProjectBuilder
             !TagView.FitsThrough<ItemDefinition>(item.Data, 0, ShortestItemEnd)
             || SocketField<ItemDefinition, byte>(item.Data, 0, "InventoryItemBlock.InventoryBucket") <= 2));
         var visited = new HashSet<uint>();
+        // A plug a project adds to a shared set reaches every socket naming that set, on installed weapons too.
+        if (edited.ContainsKey(SocketPlugSets))
+            foreach (int row in sharedRows) Members(sets, row + TagView.FieldOffset<SPlugSetRow>("Entries"), SocketPlugSets);
         while (pending.TryDequeue(out var current))
         {
             var (owner, data) = current;

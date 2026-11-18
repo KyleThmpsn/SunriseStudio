@@ -207,7 +207,7 @@ public sealed partial class ScenePage : IStudioPage
             : scene.PreviewVariant != 0 ? $"Variant {Variant(scene.PreviewVariant)}" : native;
         ImGui.BeginDisabled(context.Workspace.IsBusy);
         ImGui.SetNextItemWidth(-1);
-        if (ImGui.BeginCombo("##spawnInput", current))
+        if (StudioControls.BeginCombo("##spawnInput", current))
         {
             bool isNative = scene.PreviewSpawn is null && scene.PreviewVariant == 0;
             if (ImGui.Selectable(native, isNative) && !isNative) context.Workspace.PreviewSpawn(null);
@@ -266,7 +266,7 @@ public sealed partial class ScenePage
                 bool picked = scene.PreviewParameters.ContainsKey(parameter.Key);
                 string current = parameter.Value == 0 ? "Unresolved" : Name(parameter.Value);
                 ImGui.BeginDisabled(parameter.Values.Count == 0);
-                if (ImGui.BeginCombo("##value", current))
+                if (StudioControls.BeginCombo("##value", current))
                 {
                     foreach (uint value in parameter.Values)
                         if (ImGui.Selectable(Name(value), value == parameter.Value) && value != parameter.Value)
@@ -288,7 +288,7 @@ public sealed partial class ScenePage
     {
         if (!ReferenceEquals(channelScene, scene)) { channelEdits.Clear(); channelScene = scene; }
         ImGui.BeginDisabled(context.Workspace.IsBusy);
-        if (!ImGui.CollapsingHeader($"Channels ({scene.ObjectChannels.Count})###channels"))
+        if (!StudioControls.CollapsingHeader($"Channels ({scene.ObjectChannels.Count})###channels"))
         {
             StudioUi.Tip(ChannelHelp);
             ImGui.EndDisabled();
@@ -420,7 +420,7 @@ public sealed class PropertiesPage : IStudioPage
         }
     }
 
-    /** A node's property table, then its children; top-level nodes start open, or all as Expand All or Collapse All set. */
+    /** A node's property table, then its children; top-level nodes start open unless Expand All or Collapse All set them. */
     private void DrawNode(AssetNode node, StudioPageContext context, int depth)
     {
         if (matching is not null && !matching.Contains(node)) return;
@@ -470,8 +470,9 @@ public sealed class ReferencesPage : IStudioPage
     public unsafe void Draw(StudioPageContext context)
     {
         if (context.Workspace.Document is not { } document) return;
-        ImGui.TextDisabled($"{document.Inspection.References.Count:N0} references");
-        if (!ImGui.BeginTable("references", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY
+        int count = document.Inspection.References.Count;
+        ImGui.TextDisabled(count == 0 ? "No references" : $"{count:N0} references");
+        if (count == 0 || !ImGui.BeginTable("references", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY
             | ImGuiTableFlags.Resizable, ImGui.GetContentRegionAvail())) return;
         ImGui.TableSetupColumn("Asset", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableSetupColumn("Offset", ImGuiTableColumnFlags.WidthFixed, 72);

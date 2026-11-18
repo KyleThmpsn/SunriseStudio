@@ -6,10 +6,8 @@ using SunriseStudio.Rendering;
 namespace SunriseStudio.Editor;
 
 /**
- * Item, perk and icon asset icons for grids, lists and tooltips, read on a worker as they are drawn and uploaded a few per
- * frame (see IconStream). An icon's layers are stacked into one texture as the game draws them: the rarity plate, the
- * artwork, the season watermark and the foreground. StudioForm owns the one cache and prepares it with the last catalog
- * read. An icon that cannot be read shows as the empty frame. The item page reports its own icon errors.
+ * Item, perk and icon asset icons, read on a worker as they are drawn and uploaded a few per frame (see IconStream).
+ * Layers stack as the game draws them: plate, artwork, season watermark, foreground. A failed read shows the frame.
  */
 public sealed class InvestmentIconCache : IDisposable
 {
@@ -19,12 +17,11 @@ public sealed class InvestmentIconCache : IDisposable
     /** The page context's cache, or Unprepared when the page is drawn without one. */
     internal static InvestmentIconCache Of(StudioPageContext context) => context.Icons ?? Unprepared;
 
-    // A texel at or below this alpha, out of 255, is part of the transparent margin an icon asset's trim leaves out; block
-    // compression leaves faint texels there.
+    // Alpha at or below this, of 255, is margin the trim leaves out; block compression leaves faint texels there.
     private const byte MarginAlpha = 8;
     // Items by index, sandbox perks by index, icon table rows no item names, and icon assets by tag.
     private readonly IconStream<IconImage, GpuTexture> items = new(), perks = new(), rows = new(), assets = new();
-    // Icon asset tags by the stream key each was given. A stream reads only keys from 0 up, and most tags are negative as an int.
+    // Icon asset tags by stream key, since a stream reads only keys from 0 up and most tags are negative as an int.
     private readonly List<uint> assetTags = [];
     private readonly Dictionary<uint, int> assetKeys = [];
     private InvestmentCatalog? catalog;
@@ -45,8 +42,8 @@ public sealed class InvestmentIconCache : IDisposable
         ReferenceEquals(source, catalog) && row >= 0 ? rows.Get(row) : null;
 
     /**
-     * Requests an icon container or icon bitmap asset, trimmed to the part its pixels fill, since it is drawn far below its
-     * size. @return Its texture once uploaded, else null.
+     * Requests an icon container or bitmap asset, trimmed to its filled pixels.
+     * @return Its texture once uploaded, else null.
      */
     public GpuTexture? Asset(InvestmentCatalog source, uint tag)
     {
@@ -64,8 +61,8 @@ public sealed class InvestmentIconCache : IDisposable
     public bool NoPerkIcon(InvestmentCatalog source, int perk) => ReferenceEquals(source, catalog) && perks.Missing(perk);
 
     /**
-     * Draws the item's icon as a square ImGui item of side pixels. A frame stands in while it loads or when it has none, and an
-     * index that names no item, such as -1, leaves the square empty.
+     * Draws the item's icon as a square of side pixels. A frame stands in until it loads; an index naming no item
+     * draws nothing.
      */
     public void Draw(InvestmentCatalog source, int item, float side)
     {
@@ -92,7 +89,7 @@ public sealed class InvestmentIconCache : IDisposable
         draw.AddImage(texture.ImGuiId, at, at + size);
     }
 
-    /** Runs between frames. A new catalog restarts the streams, then what the worker read uploads within the per-frame budget. */
+    /** Runs between frames: a new catalog restarts the streams, then reads upload within the frame budget. */
     public void Prepare(InvestmentCatalog? current, Dx11Renderer renderer)
     {
         if (!ReferenceEquals(current, catalog))
@@ -123,10 +120,8 @@ public sealed class InvestmentIconCache : IDisposable
     }
 
     /**
-     * Stacks the icon's layers over its first layer's square, then makes its half-size levels down to one texel so it stays
-     * smooth far below its size. A layer of another size is sampled to fit. Trim leaves out the transparent margin.
-     * Null for no icon. Artwork that does not decode throws, which the stream counts as no icon; another layer that does not
-     * decode is left out.
+     * Stacks the layers over the first one's square, scaling other sizes, trims the margin and makes half-size levels.
+     * Null for no icon. Artwork that fails throws, counted as no icon; another failed layer is left out.
      */
     private static IconImage? Stack(InvestmentIcon? icon, bool trim = false)
     {

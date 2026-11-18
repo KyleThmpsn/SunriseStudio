@@ -30,7 +30,7 @@ public sealed partial class MissionGraphPage
     {
         if (IsScriptGroup && HasSourceDraft) editable = false;
         ImGui.SetNextItemWidth(Math.Clamp(ImGui.GetContentRegionAvail().X * .4f, 120, 300));
-        if (ImGui.BeginCombo("##graph-group", GroupTitle(groupKey), ImGuiComboFlags.HeightLarge))
+        if (StudioControls.BeginCombo("##graph-group", GroupTitle(groupKey), ImGuiComboFlags.HeightLarge))
         {
             if (ImGui.Selectable("Script", groupKey == MissionScriptGraph.Root)) OpenGroup(MissionScriptGraph.Root);
             foreach (var node in (scriptGraph?.Nodes.Where(scriptGraph.CanOpen) ?? []).Concat(scriptGraph?.Callbacks ?? []))

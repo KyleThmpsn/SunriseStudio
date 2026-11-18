@@ -142,8 +142,8 @@ public sealed partial class StudioNameIndex
     }
 
     /**
-     * The objective, plug, sack and quality blocks are set when their pointers are not null. An item lists a socket when
-     * its socket array has a row, and names a weapon type when the identifier is not FNV-1 of an empty name.
+     * Blocks are set when their pointers are; an item has a socket when its array has a row, and a weapon type when the
+     * identifier is not FNV-1 of an empty name.
      */
     private static InvestmentItemFacts ItemFacts(byte[] item, ushort index, uint hash, uint displayTag, string line)
     {

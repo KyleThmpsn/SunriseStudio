@@ -247,6 +247,18 @@ internal static class IconList
     public static float RowHeight(float scale) => ImGui.GetTextLineHeightWithSpacing() * 2 + 7 * scale;
 
     /**
+     * Shades every second row of a list in the table stripe colour, so the eye follows one row across. Call it at the
+     * row's start, before the row draws, so the row's own hover and selection show over it.
+     */
+    public static void Stripe(int row, float height)
+    {
+        if (row % 2 == 0) return;
+        var start = ImGui.GetCursorScreenPos();
+        ImGui.GetWindowDrawList().AddRectFilled(start, start + new Vector2(ImGui.GetContentRegionAvail().X, height),
+            ImGui.GetColorU32(ImGuiCol.TableRowBgAlt));
+    }
+
+    /**
      * One two-line list row: icon, name, detail line, badge and modified dot. Its Selectable is the last item drawn.
      * @param iconColumn True for item rows, which keep the icon's room whether or not the icon loaded or exists.
      * @return True when the row was clicked.

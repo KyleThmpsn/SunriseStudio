@@ -5,6 +5,7 @@ using SunriseStudio.Authoring;
 using SunriseStudio.Formats;
 using SunriseStudio.Packages.Registry;
 using SunriseStudio.World;
+using SunriseStudio.Viewport;
 
 namespace SunriseStudio.Editor.Creation;
 
@@ -231,14 +232,14 @@ public sealed class DirectorWorkflow : CreationWorkflow
             var zone = rows[index];
             // A bubble can hold several bundle landings, so the row index is the ID.
             ImGui.PushID(index);
-            ImGui.Checkbox("##keep", ref zone.Kept);
+            StudioControls.Checkbox("##keep", ref zone.Kept);
             ImGui.SameLine();
             ImGui.SetNextItemWidth(180 * CreationWidgets.Scale);
             ImGui.InputText("##name", ref zone.Name, 64);
             ImGui.SameLine();
             ImGui.SetNextItemWidth(220 * CreationWidgets.Scale);
             var sets = zone.Sets.Select(set => $"0x{set.Set:X8} ({set.Points} points)").ToArray();
-            ImGui.Combo("##set", ref zone.Set, sets, sets.Length);
+            StudioControls.Combo("##set", ref zone.Set, sets, sets.Length);
             ImGui.SameLine();
             var centre = zone.Sets[zone.Set].Centre;
             ImGui.TextDisabled($"bubble 0x{zone.Bubble:X8} at {centre.X:F0}, {centre.Y:F0}, {centre.Z:F0}");

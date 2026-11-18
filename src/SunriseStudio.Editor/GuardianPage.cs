@@ -75,7 +75,7 @@ public sealed class GuardianPage : IStudioPage
         DrawColours(current, Change);
         ImGui.EndDisabled();
         var notes = document.Guardian!.Diagnostics;
-        if (notes.Count != 0 && ImGui.CollapsingHeader($"Notes ({notes.Count})###notes"))
+        if (notes.Count != 0 && StudioControls.CollapsingHeader($"Notes ({notes.Count})###notes"))
             StudioUi.Facts("guardian-notes", notes);
     }
 
@@ -119,7 +119,7 @@ public sealed class GuardianPage : IStudioPage
     {
         var workspace = context.Workspace;
         ImGui.SetNextItemWidth(ImGui.GetFontSize() * 7);
-        if (ImGui.BeginCombo("##guardian-class", GuardianClasses.ForBody(body)?.Name ?? "Class"))
+        if (StudioControls.BeginCombo("##guardian-class", GuardianClasses.ForBody(body)?.Name ?? "Class"))
         {
             foreach (var item in GuardianClasses.All)
                 if (ImGui.Selectable(item.Name, item.BodyTag == body) && item.BodyTag != body)
@@ -223,7 +223,7 @@ public sealed class GuardianPage : IStudioPage
     /** A collapsing section with tip on its header. */
     private static bool Section(string label, string tip, ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags.None)
     {
-        bool open = ImGui.CollapsingHeader(label, flags);
+        bool open = StudioControls.CollapsingHeader(label, flags);
         StudioUi.Tip(tip);
         return open;
     }
@@ -251,7 +251,7 @@ public sealed class GuardianPage : IStudioPage
         ImGui.TextUnformatted(label);
         ImGui.SameLine(ImGui.GetFontSize() * 6);
         ImGui.SetNextItemWidth(PickerWidth());
-        if (!ImGui.BeginCombo("##" + label, (uint)current < (uint)count ? name(current) : blank)) return false;
+        if (!StudioControls.BeginCombo("##" + label, (uint)current < (uint)count ? name(current) : blank)) return false;
         for (int index = 0; index < count; index++)
         {
             ImGui.PushID(index);
@@ -286,7 +286,7 @@ public sealed class GuardianPage : IStudioPage
         string preview = current is { } chosen and not 0 ? LabelOf(workspace, chosen)
             : leading.FirstOrDefault(row => row.Value == current)?.Label ?? "None";
         string placeholderTip = placeholder != 0 ? $"Class default: {LabelOf(workspace, placeholder)}. {PlaceholderNote}" : "";
-        if (ImGui.BeginCombo("##item", preview, ImGuiComboFlags.HeightLarge))
+        if (StudioControls.BeginCombo("##item", preview, ImGuiComboFlags.HeightLarge))
         {
             if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
             ImGui.SetNextItemWidth(-1);

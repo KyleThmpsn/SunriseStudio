@@ -118,6 +118,16 @@ public sealed class ViewerCamera
         Pivot += (Right * local.X + heading * local.Y + Vector3.UnitZ * local.Z) * speed * seconds;
     }
 
+    /**
+     * Free flight carries the pivot with the eye along the look direction, so looking up or down climbs or sinks.
+     * @param local X right, Y along the look direction, Z straight up.
+     */
+    public void Fly(Vector3 local, float seconds, float speed)
+    {
+        if (local.LengthSquared() > 1) local = Vector3.Normalize(local);
+        Pivot += (Right * local.X + Forward * local.Y + Vector3.UnitZ * local.Z) * speed * seconds;
+    }
+
     public void SetView(float yaw, float pitch)
     {
         Yaw = yaw;
